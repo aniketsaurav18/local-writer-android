@@ -1,0 +1,20 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.localwriter">
+  <uses-sdk android:minSdkVersion="33" android:targetSdkVersion="36"/>
+  <uses-permission android:name="android.permission.VIBRATE"/>
+  <queries><intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent></queries>
+  <application android:label="Local Writer" android:theme="@style/AppTheme" android:icon="@drawable/ic_writer" android:allowBackup="false" android:usesCleartextTraffic="false" android:extractNativeLibs="true" android:supportsRtl="true">
+    <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+      <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+      <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="text/plain"/></intent-filter>
+      <intent-filter><action android:name="android.intent.action.PROCESS_TEXT"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="text/plain"/></intent-filter>
+    </activity>
+    <service android:name=".WriterAccessibilityService" android:label="Local Writer assistant" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
+      <intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter>
+      <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service"/>
+    </service>
+    <service android:name=".WriterKeyboard" android:label="Local Writer keyboard" android:permission="android.permission.BIND_INPUT_METHOD" android:exported="true">
+      <intent-filter><action android:name="android.view.InputMethod"/></intent-filter>
+      <meta-data android:name="android.view.im" android:resource="@xml/input_method"/>
+    </service>
+  </application>
+</manifest>

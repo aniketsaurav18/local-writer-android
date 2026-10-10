@@ -1,0 +1,14 @@
+.gradle/
+.cache/
+build/
+app/build/
+dist/
+local.properties
+*.jks
+*.p12
+app/src/main/assets/local-model/
+vendor/llama.cpp/
+vendor/*.aar
+vendor/*.jar
+vendor/host/
+vendor/*.tar.gz
