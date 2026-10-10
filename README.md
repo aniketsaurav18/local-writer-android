@@ -6,6 +6,8 @@ The app provides an editor with correction underlines and suggestion cards, a dr
 
 This is original source code. The supplied APK was used to understand the Android accessibility approach; its proprietary classes and assets are not included. Cloud-only quality and behavior cannot be reproduced one-to-one by these smaller local models. Custom editors that omit usable Android accessibility and input-connection interfaces cannot be edited reliably. Passwords are deliberately excluded. See [accessibility implementation and limits](docs/ACCESSIBILITY.md).
 
+Grammar inference follows the model's bare-word byte-BPE and first-subword labeling format. Suggestions come from its predicted edits and the spelling dictionary; there are no phrase-specific grammar exceptions. See [model input and decoding](docs/GRAMMAR_MODEL.md) for source references and quality limits.
+
 ## Build
 
 Use Python 3.12+, JDK 17+, CMake, Android SDK platform/build-tools 36.0.0 and NDK 27.1.12297006. `ANDROID_SDK_ROOT` defaults to `~/Android/Sdk`. The SDK command-line build avoids Gradle daemons and uses two native compilation threads and a 640 MiB Kotlin compiler heap. It never starts an emulator.

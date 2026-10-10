@@ -21,7 +21,10 @@ class GrammarEngine(dir: File) : AutoCloseable {
     private val bytes = Array(256) { "" }
     private val environment = OrtEnvironment.getEnvironment()
     private val session: OrtSession
-    private val bpePattern = Pattern.compile("'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+")
+    // This artifact was trained on whitespace tokens, not raw-text RoBERTa
+    // tokenization. Keep punctuation/contractions attached and encode each word
+    // without a leading space (upstream ByteBpe.encode_words contract).
+    private val modelWordPattern = Pattern.compile("[^\\p{Z}\\s\\u0085]+")
     init {
         val v = JSONObject(File(dir, "vocab.json").readText()); v.keys().forEach { vocab[it] = v.getInt(it) }
         val l = JSONObject(File(dir, "labels.json").readText()); labels = Array(l.length()) { l.getString(it.toString()) }
@@ -59,21 +62,21 @@ class GrammarEngine(dir: File) : AutoCloseable {
         }
         cache[token] = parts; return parts
     }
-    private data class Encoded(val ids: MutableList<Int> = mutableListOf(), val ends: MutableList<Int> = mutableListOf())
-    private fun encode(text: String): Encoded {
-        val out = Encoded(); val m = bpePattern.matcher(" $text")
-        while (m.find()) {
-            val piece = m.group(); val mapped = piece.toByteArray(Charsets.UTF_8).joinToString("") { bytes[it.toInt() and 255] }
-            val ends = mutableListOf<Int>(); var i = 0
-            while (i < piece.length) {
-                val cp = piece.codePointAt(i); val length = Character.charCount(cp)
-                repeat(String(Character.toChars(cp)).toByteArray(Charsets.UTF_8).size) { ends += m.start() + i + length - 1 }
-                i += length
-            }
-            var cursor = 0
-            for (part in bpe(mapped)) { cursor += part.length; out.ids += vocab[part] ?: vocab.getValue("<unk>"); out.ends += ends[cursor - 1] }
+    private data class Encoded(val ids: List<Int>, val wordStarts: List<Int>)
+    private fun modelWords(text: String): List<String> {
+        val words = mutableListOf<String>(); val matcher = modelWordPattern.matcher(text)
+        while (matcher.find()) words += matcher.group()
+        return words
+    }
+    private fun encode(words: List<String>): Encoded {
+        val ids = mutableListOf(vocab.getValue("<s>")); val starts = mutableListOf<Int>()
+        for (word in words) {
+            starts += ids.size
+            val mapped = word.toByteArray(Charsets.UTF_8).joinToString("") { bytes[it.toInt() and 255] }
+            for (part in bpe(mapped)) ids += vocab[part] ?: vocab.getValue("<unk>")
         }
-        return out
+        ids += vocab.getValue("</s>")
+        return Encoded(ids, starts)
     }
     private fun transform(word: String, tag: String): String {
         if (tag == "\$TRANSFORM_CASE_CAPITALIZE") return word.replaceFirstChar { it.uppercaseChar() }
@@ -96,40 +99,30 @@ class GrammarEngine(dir: File) : AutoCloseable {
         repeat(4) {
             if (!active()) throw CancellationException()
             if (!visited.add(cur)) return cur
-            val words = TextLogic.words(cur); if (words.isEmpty()) return cur
-            val enc = encode(cur); require(enc.ids.size <= 510) { "Sentence exceeds local model context" }
-            val ids = arrayOf(LongArray(enc.ids.size + 2)); val mask = arrayOf(LongArray(enc.ids.size + 2) { 1 })
-            ids[0][0] = vocab.getValue("<s>").toLong(); ids[0][ids[0].lastIndex] = vocab.getValue("</s>").toLong()
-            enc.ids.forEachIndexed { i, id -> ids[0][i + 1] = id.toLong() }
-            val tags = Array(words.size) { "\$KEEP" }; var si = 0
+            val words = modelWords(cur); if (words.isEmpty()) return cur
+            val enc = encode(words); require(enc.ids.size <= 512) { "Sentence exceeds local model context" }
+            val ids = arrayOf(enc.ids.map(Int::toLong).toLongArray()); val mask = arrayOf(LongArray(enc.ids.size) { 1 })
+            val tags = Array(words.size) { "\$KEEP" }
             OnnxTensor.createTensor(environment, ids).use { input -> OnnxTensor.createTensor(environment, mask).use { attention ->
                 session.run(mapOf("input_ids" to input, "attention_mask" to attention)).use { result ->
                     @Suppress("UNCHECKED_CAST") val logits = (result[0].value as Array<Array<FloatArray>>)[0]
                     for (i in words.indices) {
-                        while (si < enc.ends.size && enc.ends[si] <= words[i].start) si++
-                        val row = logits[1 + minOf(si, enc.ids.lastIndex)]; var best = 0
+                        val row = logits[enc.wordStarts[i]]; var best = 0
                         for (j in 1 until row.size) if (row[j] > row[best]) best = j
-                        val sum = row.sumOf { Math.exp((it - row[best]).toDouble()) }
-                        tags[i] = if (1 / sum >= 0.7) labels[best] else "\$KEEP"
+                        // The shipped upstream decoder uses argmax by default. A
+                        // confidence floor requires development-set calibration;
+                        // the old blanket 0.7 floor silently discarded predictions.
+                        tags[i] = labels[best]
                     }
                 }
             } }
-            val drop = mutableSetOf<Int>(); val keep = mutableSetOf<Int>()
-            for (i in tags.indices) {
-                val tag = tags[i]
-                if (tag.startsWith("\$REPLACE_")) {
-                    val payload = tag.substring(9).split(' ')
-                    if (payload.size > 1 && i + payload.size <= words.size && (1 until payload.size).all { words[i + it].text == payload[it] })
-                        (1 until payload.size).forEach { drop += i + it }
-                }
-                if (tag != "\$KEEP" && i < tags.lastIndex && tag == tags[i + 1] && !tag.startsWith("\$APPEND_") && i + 1 !in drop) keep += i + 1
-            }
+            // Predictions address the original token indexes. Consume MERGE pairs
+            // once; DELETE/APPEND must not shift the targets of subsequent labels.
             val result = mutableListOf<String>(); var changed = false; var i = 0
             while (i < words.size) {
-                val w = words[i].text; val t = tags[i]
+                val w = words[i]; val t = tags[i]
                 when {
-                    i in drop -> {}
-                    i in keep || t == "\$KEEP" -> result += w
+                    t == "\$KEEP" -> result += w
                     t == "\$DELETE" -> changed = true
                     t.startsWith("\$APPEND_") -> { result += w; result += t.substring(8); changed = true }
                     t.startsWith("\$REPLACE_") -> { result += t.substring(9).split(' '); changed = true }
@@ -156,7 +149,7 @@ class GrammarEngine(dir: File) : AutoCloseable {
                 while (tokens.find() && count++ < 80) boundary = tokens.end()
                 if (boundary == start) break
                 var sentence = text.substring(start, boundary).trimEnd()
-                while (encode(sentence).ids.size > 400 && sentence.length > 1) {
+                while (encode(modelWords(sentence)).ids.size > 400 && sentence.length > 1) {
                     var split = sentence.lastIndexOf(' ', sentence.length / 2)
                     if (split < 1) split = sentence.offsetByCodePoints(0, maxOf(1, sentence.codePointCount(0, sentence.length) / 2))
                     boundary = start + split; sentence = text.substring(start, boundary)
