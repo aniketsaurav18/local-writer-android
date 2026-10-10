@@ -13,6 +13,8 @@ import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -26,7 +28,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.view.inputmethod.EditorInfo
 import android.widget.LinearLayout
-import android.widget.ImageView
 import android.widget.ScrollView
 import kotlin.math.abs
 
@@ -57,13 +58,14 @@ class WriterAccessibilityService : AccessibilityService() {
     private var undo: Undo? = null
     private var dismissedEditor: EditorKey? = null
     private var dismissedNode: NodeKey? = null
-    private var bubble: ImageView? = null
+    private var bubble: WritingWidget? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var sheet: LinearLayout? = null
     private var sheetParams: WindowManager.LayoutParams? = null
     private var panel: AssistantPanel? = null
     private var panelSnapshot: Snapshot? = null
     private var suggestionCount = 0
+    private var checkState = WritingCheckState.IDLE
     private var connected = false
     private var readFailure = ReadFailure.TRANSIENT
     private var transientReadStarted = 0L
@@ -179,6 +181,9 @@ class WriterAccessibilityService : AccessibilityService() {
     private fun invalidateResults() {
         revision++
         checkedSnapshot = null; fieldEdits = emptyList()
+        if (sheet == null) {
+            suggestionCount = 0; checkState = WritingCheckState.CHECKING; updateBubble()
+        }
         if (connected) { analysis.cancel(); highlights.clear() }
     }
 
@@ -317,13 +322,16 @@ class WriterAccessibilityService : AccessibilityService() {
             return
         }
         if (!changed && !alteredRevision) return
-        suggestionCount = 0; updateBubble()
+        suggestionCount = 0
+        checkState = if (new.text.isBlank()) WritingCheckState.IDLE else WritingCheckState.CHECKING
+        updateBubble()
         if (new.text.isBlank()) { analysis.cancel(); return }
         val expected = snapshot!!
         analysis.check(expected.text) { result ->
             if (snapshot != expected || !allowed(expected.pkg)) return@check
             fieldEdits = result.getOrDefault(emptyList()); checkedSnapshot = expected
             suggestionCount = fieldEdits.size
+            checkState = if (result.isSuccess) WritingCheckState.READY else WritingCheckState.UNAVAILABLE
             updateBubble()
             redrawHighlights()
         }
@@ -554,16 +562,9 @@ class WriterAccessibilityService : AccessibilityService() {
     ).apply { gravity = Gravity.TOP or Gravity.LEFT; title = "Local Writer" }
 
     private fun showBubble() {
-        if (!typingVisible()) { hideBubble(); return }
+        if (sheet != null || !typingVisible()) { hideBubble(); return }
         if (bubble != null) { updateBubble(); return }
-        val view = ImageView(this).apply {
-            setImageResource(R.drawable.ic_writer_widget)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            background = Ui.background(Ui.GREEN, Ui.dp(this@WriterAccessibilityService, 12))
-            elevation = Ui.dp(this@WriterAccessibilityService, 4).toFloat()
-            contentDescription = "Open local writing assistant"
-            isFocusable = false
-        }
+        val view = WritingWidget(this)
         val p = overlayParams(Ui.dp(this, 48), Ui.dp(this, 48))
         bubble = view; bubbleParams = p
         positionOverlays()
@@ -591,7 +592,7 @@ class WriterAccessibilityService : AccessibilityService() {
     }
 
     private fun updateBubble() {
-        bubble?.contentDescription = "Open local writing assistant, $suggestionCount suggestions"
+        bubble?.update(suggestionCount, checkState)
     }
 
     private fun typingVisible(): Boolean {
@@ -620,20 +621,38 @@ class WriterAccessibilityService : AccessibilityService() {
         // Refresh before opening: a bubble click may race the next text/focus event or its debounce.
         refreshField()
         val current = snapshot ?: return
+        val knownCorrections = checkedSnapshot?.takeIf {
+            checkState == WritingCheckState.READY && it.revision == revision && sameField(it, current) &&
+                it.text == current.text && it.offset == current.offset
+        }?.let { fieldEdits.toList() }
         analysis.cancel()
         highlights.clear()
-        val root = Ui.column(this, 4).apply { background = Ui.background(); isFocusable = false }
-        val controls = Ui.row(this)
-        controls.addView(Ui.button(this, "Undo") { undoLast() })
-        controls.addView(Ui.button(this, "Dismiss") {
-            dismissedEditor = snapshot?.editor; dismissedNode = snapshot?.node; clearField()
-        })
-        controls.addView(Ui.button(this, "Pause 15m") {
-            prefs.pauseUntil = System.currentTimeMillis() + 15 * 60 * 1000
-            clearField(); Engine.main.removeCallbacks(resume); Engine.main.postDelayed(resume, 15 * 60 * 1000L)
-        })
-        root.addView(controls)
-        root.addView(Ui.button(this, "Disable in this app") { snapshot?.pkg?.let { prefs.block(it, true) }; clearField() })
+        val root = Ui.column(this, 0).apply {
+            val radius = Ui.dp(this@WriterAccessibilityService,28).toFloat()
+            background = GradientDrawable().apply {
+                setColor(Color.WHITE); cornerRadii = floatArrayOf(radius,radius,radius,radius,0f,0f,0f,0f)
+            }
+            isFocusable = false
+        }
+        val handleArea = android.widget.FrameLayout(this).apply {
+            addView(View(this@WriterAccessibilityService).apply {
+                background = Ui.background(Color.rgb(46,46,46),Ui.dp(this@WriterAccessibilityService,2))
+            }, android.widget.FrameLayout.LayoutParams(Ui.dp(this@WriterAccessibilityService,32),Ui.dp(this@WriterAccessibilityService,4),Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                topMargin = Ui.dp(this@WriterAccessibilityService,8)
+            })
+            contentDescription = "Drag down to close suggestions"
+            setOnTouchListener(object : View.OnTouchListener {
+                var start = 0f
+                override fun onTouch(view: View, event: MotionEvent): Boolean {
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> start = event.rawY
+                        MotionEvent.ACTION_UP -> if (event.rawY - start > Ui.dp(this@WriterAccessibilityService,32)) closeSheet()
+                    }
+                    return true
+                }
+            })
+        }
+        root.addView(handleArea,LinearLayout.LayoutParams(-1,Ui.dp(this,24)))
         panelSnapshot = current
         val assistant = AssistantPanel(this, ::apply, ::closeSheet, highlight = { edits ->
             checkedSnapshot = panelSnapshot; fieldEdits = edits
@@ -643,15 +662,28 @@ class WriterAccessibilityService : AccessibilityService() {
             if (s == null || s.selectionStart < s.offset || s.selectionEnd < s.offset ||
                 s.selectionStart > s.offset + s.text.length || s.selectionEnd > s.offset + s.text.length) null
             else (s.selectionStart - s.offset) to (s.selectionEnd - s.offset)
-        })
+        }, checkState = { state -> checkState = state; updateBubble() }, options = listOf(
+            "Undo last correction" to { undoLast() },
+            "Dismiss assistant" to {
+                dismissedEditor = snapshot?.editor; dismissedNode = snapshot?.node; clearField()
+            },
+            "Pause for 15 minutes" to {
+                prefs.pauseUntil = System.currentTimeMillis() + 15 * 60 * 1000
+                clearField(); Engine.main.removeCallbacks(resume)
+                Engine.main.postDelayed(resume, 15 * 60 * 1000L)
+            },
+            "Disable in this app" to { snapshot?.pkg?.let { prefs.block(it, true) }; clearField() }
+        ), overlayStyle = true)
         val scroll = ScrollView(this).apply { isFillViewport = false; addView(assistant); isFocusable = false }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         panel = assistant; sheet = root
         sheetParams = overlayParams(-1, Ui.dp(this, 360))
         positionOverlays()
         if (runCatching { wm.addView(root, sheetParams) }.isFailure) { closeSheet(); return }
-        assistant.update(current.text, true)
+        hideBubble()
+        assistant.update(current.text, true, knownCorrections)
     }
+
 
     /** Keep touch targets above both the IME window and system/cutout insets. */
     private fun positionOverlays() {
@@ -684,17 +716,29 @@ class WriterAccessibilityService : AccessibilityService() {
     }
 
     private fun closeSheet() {
+        val current = snapshot
+        val previous = panelSnapshot
+        val cached = if (current != null && previous != null && sameTarget(previous, current) &&
+            previous.text == current.text && previous.offset == current.offset) panel?.currentCorrections(current.text) else null
+        val wasOpen = sheet != null
         panel?.dispose(); panel = null; panelSnapshot = null
         sheet?.let { if (connected) runCatching { wm.removeViewImmediate(it) } }
         sheet = null; sheetParams = null
+        if (connected && wasOpen && current != null) {
+            if (cached != null) {
+                checkedSnapshot = current.copy(revision = revision); fieldEdits = cached
+                suggestionCount = cached.size; checkState = WritingCheckState.READY; updateBubble()
+            } else { invalidateResults(); scheduleRefresh() }
+            showBubble()
+        }
         if (connected) redrawHighlights()
     }
     private fun clearField() {
         transientReadStarted = 0L; fieldReadPending = false
         invalidateResults(); Engine.main.removeCallbacks(refresh); Engine.main.removeCallbacks(confirmUndo)
-        closeSheet()
-        hideBubble(); suggestionCount = 0
         snapshot = null; retainedNode?.recycle(); retainedNode = null; undo = null
+        closeSheet()
+        hideBubble(); suggestionCount = 0; checkState = WritingCheckState.IDLE
     }
     override fun onInterrupt() { editor = null; epoch++; clearField() }
     override fun onDestroy() {
