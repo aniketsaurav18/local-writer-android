@@ -1,13 +1,10 @@
 #include <jni.h>
 #include "llama.h"
-#include <algorithm>
 #include <atomic>
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 static std::mutex mutex;
 static std::atomic<uint64_t> cancel_epoch{0};

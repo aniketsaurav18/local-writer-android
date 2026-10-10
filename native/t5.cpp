@@ -2,11 +2,9 @@
 #include "llama.h"
 #include <atomic>
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 namespace {
 std::mutex t5_mutex;
