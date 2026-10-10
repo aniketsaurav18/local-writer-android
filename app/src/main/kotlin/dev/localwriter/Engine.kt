@@ -78,6 +78,7 @@ object LocalRewriter {
         val ticket = epoch()
         val task = custom.ifBlank { when (kind) {
             "Concise" -> "Make the text concise while preserving its meaning."
+            "Rephrase" -> "Rephrase the text using different wording while preserving its meaning."
             "Professional" -> "Rewrite the text in a professional tone, preserving its meaning."
             "Friendly" -> "Rewrite the text in a friendly, natural tone, preserving its meaning."
             "Expand" -> "Make the text clearer and more detailed without inventing any facts."

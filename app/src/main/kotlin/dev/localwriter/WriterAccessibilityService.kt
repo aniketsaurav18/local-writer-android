@@ -43,6 +43,7 @@ class WriterAccessibilityService : AccessibilityService() {
     private data class Undo(val source: Snapshot, val replacement: String, val original: String,
         var confirmed: Boolean = false, val submitted: Long = android.os.SystemClock.uptimeMillis())
     private enum class ReadFailure { TRANSIENT, REJECTED }
+    private enum class CapturedTargetState { PRESENT, UNKNOWN, GONE }
     private lateinit var prefs: Prefs
     private lateinit var wm: WindowManager
     private lateinit var analysis: AnalysisSession
@@ -63,7 +64,13 @@ class WriterAccessibilityService : AccessibilityService() {
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var sheet: LinearLayout? = null
     private var sheetParams: WindowManager.LayoutParams? = null
+    private var sheetDismissing = false
     private var compactSheet = false
+    private var compactWidth = 0
+    private var keyboardHeight = 0
+    private var expandedSheetHeight = 0
+    private var autoPillShown = false
+    private var promptFocused = false
     private var sheetAnchorX = -1
     private var sheetAnchorY = -1
     private var sheetOnRight = true
@@ -73,12 +80,17 @@ class WriterAccessibilityService : AccessibilityService() {
     private var checkState = WritingCheckState.IDLE
     private var connected = false
     private var readFailure = ReadFailure.TRANSIENT
-    private var transientReadStarted = 0L
+    private var transientReadAttempts = 0
     private var fieldReadPending = false
+    private var emptyPillMinimizeScheduled = false
     private var receiverRegistered = false
     private var dragX = -1
     private var dragY = -1
     private val refresh = Runnable { refreshField() }
+    private val minimizeEmptyPill = Runnable {
+        emptyPillMinimizeScheduled = false
+        if (shouldMinimizeEmptyPill()) closeSheet()
+    }
     private val resume = Runnable { scheduleRefresh() }
     private val confirmUndo: Runnable = Runnable {
         val last = undo
@@ -106,6 +118,17 @@ class WriterAccessibilityService : AccessibilityService() {
     override fun onCreateInputMethod(): InputMethod = object : InputMethod(this) {
         override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
             super.onStartInput(attribute, restarting)
+            // Our rewrite prompt must never become the document being corrected.
+            if (sheet != null && attribute.packageName == packageName) {
+                editor = null
+                positionOverlays()
+                return
+            }
+            if (sheet != null && attribute.packageName.isNullOrBlank()) {
+                // An IME teardown with no editor metadata is not an app switch.
+                editor = null; invalidateResults(); fieldReadPending = true; scheduleRefresh()
+                return
+            }
             val preservePanel = sheet != null && snapshot?.pkg == attribute.packageName &&
                 !TextLogic.sensitive(attribute.inputType) &&
                 (attribute.inputType == 0 || TextLogic.editableTextType(attribute.inputType))
@@ -117,6 +140,7 @@ class WriterAccessibilityService : AccessibilityService() {
         }
         override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
             super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+            if (promptFocused) { positionOverlays(); return }
             if (sheet == null) invalidateResults()
             scheduleRefresh()
         }
@@ -124,6 +148,7 @@ class WriterAccessibilityService : AccessibilityService() {
             super.onFinishInput()
             editor = null; epoch++
             dismissedEditor = null; dismissedNode = null
+            if (promptFocused) { positionOverlays(); return }
             if (sheet != null) {
                 // The sheet owns a captured editor. Losing its IME connection during
                 // overlay creation is not proof the user switched fields or apps.
@@ -150,8 +175,10 @@ class WriterAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (!connected || event == null) return
         val pkg = event.packageName?.toString()
-        // Our nonfocusable overlays produce content events, but never become an editor.
-        if (pkg == packageName && event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        // Prompt typing belongs to the assistant, never to the captured external document.
+        if (pkg == packageName && event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return
+        if (promptFocused) { scheduleRefresh(0); return }
         when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
             AccessibilityEvent.TYPE_VIEW_FOCUSED, AccessibilityEvent.TYPE_VIEW_CLICKED,
@@ -189,6 +216,7 @@ class WriterAccessibilityService : AccessibilityService() {
         pkg != "com.android.systemui" && prefs.allowed(pkg) && unlocked()
 
     private fun invalidateResults() {
+        cancelEmptyPillMinimize()
         revision++
         checkedSnapshot = null; fieldEdits = emptyList()
         if (sheet == null) {
@@ -200,9 +228,62 @@ class WriterAccessibilityService : AccessibilityService() {
     }
 
     private fun nodeKey(node: AccessibilityNodeInfo) = NodeKey(node.windowId, node.hashCode(), node.viewIdResourceName, node.uniqueId)
-    private fun validNode(node: AccessibilityNodeInfo): Boolean = node.isEditable && node.isFocused && node.isVisibleToUser &&
+    private fun safeEditableNode(node: AccessibilityNodeInfo): Boolean = node.isEditable && node.isVisibleToUser &&
         !node.isPassword && !(Build.VERSION.SDK_INT >= 34 && node.isAccessibilityDataSensitive) && !TextLogic.sensitive(node.inputType) &&
         (node.inputType == 0 || TextLogic.editableTextType(node.inputType))
+    private fun validNode(node: AccessibilityNodeInfo): Boolean = node.isFocused && safeEditableNode(node)
+
+    /** IME dismissal can remove input focus without removing the captured document. */
+    private fun capturedTargetState(): CapturedTargetState {
+        val target = snapshot ?: return CapturedTargetState.GONE
+        if (sheet == null || !allowed(target.pkg)) return CapturedTargetState.GONE
+        return runCatching {
+            var found = false
+            var applicationSeen = false
+            var unreadable = false
+            for (window in windows) {
+                if (window.type == AccessibilityWindowInfo.TYPE_SYSTEM && (window.isFocused || window.isActive))
+                    return@runCatching CapturedTargetState.GONE
+                if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
+                applicationSeen = true
+                val root = window.root
+                if (root == null) { unreadable = true; continue }
+                try {
+                    val matchingWindow = root.packageName?.toString() == target.pkg &&
+                        (target.node == null || window.id == target.node.window)
+                    if ((window.isFocused || window.isActive) && !matchingWindow)
+                        return@runCatching CapturedTargetState.GONE
+                    if (!matchingWindow) continue
+                    val focus = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                    try {
+                        if (focus != null && (focus.isPassword || TextLogic.sensitive(focus.inputType) ||
+                            (Build.VERSION.SDK_INT >= 34 && focus.isAccessibilityDataSensitive) ||
+                            (focus.isEditable && target.node != null && nodeKey(focus) != target.node)))
+                            return@runCatching CapturedTargetState.GONE
+                    } finally { focus?.recycle() }
+                    found = true
+                } finally { root.recycle() }
+            }
+            when {
+                found -> CapturedTargetState.PRESENT
+                unreadable || !applicationSeen -> CapturedTargetState.UNKNOWN
+                else -> CapturedTargetState.GONE
+            }
+        }.getOrDefault(CapturedTargetState.UNKNOWN)
+    }
+
+    private fun retainedNodeForRead(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val target = snapshot ?: return null
+        val node = retainedNode ?: return null
+        if (root.packageName?.toString() != target.pkg || root.windowId != target.node?.window ||
+            capturedTargetState() != CapturedTargetState.PRESENT) return null
+        if (!node.refresh()) return null
+        if (!safeEditableNode(node) || nodeKey(node) != target.node || node.packageName?.toString() != target.pkg) {
+            readFailure = ReadFailure.REJECTED
+            return null
+        }
+        return AccessibilityNodeInfo.obtain(node)
+    }
 
     /** Fast focus lookup first. A bounded traversal only supports incomplete virtual focus trees. */
     private fun focusedNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
@@ -230,13 +311,19 @@ class WriterAccessibilityService : AccessibilityService() {
         val active = rootInActiveWindow
         val activeWindow = active?.window
         val auxiliary = activeWindow?.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY ||
-            activeWindow?.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD
+            activeWindow?.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD ||
+            (sheet != null && active?.packageName?.toString() == packageName &&
+                activeWindow?.type != AccessibilityWindowInfo.TYPE_APPLICATION)
         activeWindow?.recycle()
         if (active != null && !auxiliary) return@runCatching active
         active?.recycle()
-        // Touching a nonfocusable assistant/IME window must not lose the app's editor.
-        // A focused system dialog is not bypassed: only a genuinely focused app is eligible.
-        windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isFocused }?.root
+        windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isFocused }?.root?.let {
+            return@runCatching it
+        }
+        // The sheet may own active focus after the IME closes. Retain only its original app/window.
+        if (capturedTargetState() != CapturedTargetState.PRESENT) return@runCatching null
+        val target = snapshot ?: return@runCatching null
+        windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.id == target.node?.window }?.root
     }.getOrNull()
 
     private fun readSnapshot(): Pair<Snapshot, AccessibilityNodeInfo?>? {
@@ -253,15 +340,17 @@ class WriterAccessibilityService : AccessibilityService() {
             val sensitive = rawFocus?.let { it.isPassword || (Build.VERSION.SDK_INT >= 34 && it.isAccessibilityDataSensitive) || TextLogic.sensitive(it.inputType) } == true
             rawFocus?.recycle()
             if (sensitive) { readFailure = ReadFailure.REJECTED; return null }
+            val capturedRead = focus == null && sheet != null && snapshot?.node != null
+            if (capturedRead) {
+                focus = retainedNodeForRead(root)
+                if (focus == null) return null
+            }
             val key = focus?.let(::nodeKey)
-            // Do not replace a known field identity with a temporarily missing node
-            // while Android rebuilds the window tree for our newly opened sheet.
-            if (sheet != null && snapshot?.node != null && focus == null) return null
             val currentEditor = editor
             if (currentEditor?.pkg == pkg && currentEditor.inputType != 0 && !TextLogic.editableTextType(currentEditor.inputType)) {
                 readFailure = ReadFailure.REJECTED; return null
             }
-            if (currentEditor != null && currentEditor.pkg == pkg && TextLogic.editableTextType(currentEditor.inputType)) {
+            if (!capturedRead && currentEditor != null && currentEditor.pkg == pkg && TextLogic.editableTextType(currentEditor.inputType)) {
                 val connection = accessibilityIme?.currentInputConnection
                 val surrounding = runCatching { connection?.getSurroundingText(CONTEXT_LENGTH, CONTEXT_LENGTH, 0) }.getOrNull()
                 if (surrounding != null && surrounding.offset >= 0 && surrounding.text.length <= MAX_TEXT) {
@@ -292,6 +381,11 @@ class WriterAccessibilityService : AccessibilityService() {
 
     private fun refreshField() {
         if (!connected) return
+        if (promptFocused) {
+            if (capturedTargetState() == CapturedTargetState.GONE) { clearField(); return }
+            positionOverlays()
+            return
+        }
         // A field can remain focused after Back hides the keyboard. Do not leave
         // a launcher on that screen. An already-open correction sheet keeps its
         // captured editor across transient IME changes until it is dismissed.
@@ -301,7 +395,7 @@ class WriterAccessibilityService : AccessibilityService() {
             if (retryTransientRead()) return
             clearField(); return
         }
-        transientReadStarted = 0L; fieldReadPending = false
+        transientReadAttempts = 0; fieldReadPending = false
         val (new, node) = read
         if ((new.editor != null && new.editor == dismissedEditor) || (new.node != null && new.node == dismissedNode)) {
             node?.recycle(); clearField(); return
@@ -312,6 +406,7 @@ class WriterAccessibilityService : AccessibilityService() {
         }
         val alteredRevision = old?.revision != revision
         val changed = old == null || !sameTarget(old, new) || old.text != new.text || old.offset != new.offset
+        if (changed) autoPillShown = false
         if (changed && old != null) invalidateResults()
         if (old != null && old.offset != new.offset) issueStore.reset()
         issueStore.update(new.text)
@@ -359,40 +454,24 @@ class WriterAccessibilityService : AccessibilityService() {
             panel?.acceptAnalysis(expected.text, issueStore.current)
             updateBubble()
             redrawHighlights()
+            showSuggestionPill()
         }
     }
 
-    /** Opening an overlay can briefly invalidate Android's cached focus/window tree. */
+    private fun showSuggestionPill() {
+        if (sheet != null || autoPillShown || suggestionCount == 0 || fieldReadPending || !typingVisible()) return
+        openSheet()
+    }
+
+    /** Keep an open menu tied to its document, rather than an arbitrary IME timeout. */
     private fun retryTransientRead(): Boolean {
-        val current = snapshot ?: return false
-        if (sheet == null || readFailure != ReadFailure.TRANSIENT || !allowed(current.pkg)) return false
-        // Never retain the sheet across a confirmed app change or a focused system surface.
-        val safeForeground = runCatching {
-            for (window in windows) {
-                if (!window.isFocused && !window.isActive) continue
-                if (window.type == AccessibilityWindowInfo.TYPE_SYSTEM) return@runCatching false
-                if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
-                val root = window.root ?: continue
-                try {
-                    if (root.packageName?.toString() != current.pkg) return@runCatching false
-                    val focus = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-                    if (focus != null) {
-                        try {
-                            if (focus.isPassword || TextLogic.sensitive(focus.inputType) ||
-                                (Build.VERSION.SDK_INT >= 34 && focus.isAccessibilityDataSensitive)) return@runCatching false
-                        } finally { focus.recycle() }
-                    }
-                } finally { root.recycle() }
-            }
-            true
-        }.getOrDefault(false)
-        if (!safeForeground) return false
-        val now = android.os.SystemClock.uptimeMillis()
-        if (transientReadStarted == 0L) transientReadStarted = now
-        if (now - transientReadStarted >= 400L) return false
+        if (readFailure != ReadFailure.TRANSIENT || capturedTargetState() == CapturedTargetState.GONE) return false
         fieldReadPending = true
         highlights.clear()
-        scheduleRefresh(80)
+        positionOverlays()
+        // Window trees can be briefly unavailable during IME animations. Writes remain
+        // blocked until an event, retry, or explicit Accept can freshly validate the field.
+        if (transientReadAttempts++ < 4) scheduleRefresh(500)
         return true
     }
 
@@ -403,12 +482,7 @@ class WriterAccessibilityService : AccessibilityService() {
         if (a.pkg != b.pkg) return false
         // Node source identity survives an IME restart/backend fallback. Connection
         // authority is checked separately against a freshly read source before edits.
-        if (a.node != null && b.node != null) {
-            if (a.editor != null && b.editor != null &&
-                (a.editor.fieldId != b.editor.fieldId || a.editor.fieldName != b.editor.fieldName ||
-                    a.editor.inputType != b.editor.inputType)) return false
-            return a.node == b.node
-        }
+        if (a.node != null && b.node != null) return a.node == b.node
         return a.editor != null && a.editor == b.editor && a.node == b.node
     }
 
@@ -493,7 +567,8 @@ class WriterAccessibilityService : AccessibilityService() {
     }
 
     private fun apply(source: String, edits: List<Edit>): Boolean {
-        if (fieldReadPending) return false
+        if (promptFocused) return false
+        if (fieldReadPending) { refreshField(); if (fieldReadPending) return false }
         if (undo?.confirmed == false) { Ui.toast(this, "Waiting for the app to confirm the previous correction"); return false }
         val expected = panelSnapshot ?: return false
         if (expected.text != source || !allowed(expected.pkg)) return false
@@ -543,8 +618,11 @@ class WriterAccessibilityService : AccessibilityService() {
                 true
             } else {
                 val node = retainedNode ?: return false
-                if (!node.refresh() || !validNode(node) || nodeKey(node) != current.node ||
+                if (!node.refresh() || !safeEditableNode(node) || nodeKey(node) != current.node ||
                     node.packageName?.toString() != current.pkg || node.text?.toString().orEmpty() != current.wholeNodeText) return false
+                if (sheet != null) {
+                    if (capturedTargetState() != CapturedTargetState.PRESENT) return false
+                } else if (!node.isFocused) return false
                 val whole = current.wholeNodeText ?: return false
                 val updated = whole.substring(0, start) + replacement + whole.substring(start + before.length)
                 val result = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
@@ -586,7 +664,14 @@ class WriterAccessibilityService : AccessibilityService() {
         width, height, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
         PixelFormat.TRANSLUCENT
-    ).apply { gravity = Gravity.TOP or Gravity.LEFT; title = "Local Writer" }
+    ).apply {
+        gravity = Gravity.TOP or Gravity.LEFT; title = "Local Writer"
+        flags = flags or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        setFitInsetsTypes(0)
+        // positionOverlays owns the screen/keyboard geometry. Framework resizing
+        // would apply a second, potentially stale IME offset while it animates out.
+        softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+    }
 
     private fun showBubble() {
         if (sheet != null || !typingVisible()) { hideBubble(); return }
@@ -595,7 +680,7 @@ class WriterAccessibilityService : AccessibilityService() {
         val p = overlayParams(Ui.dp(this, 48), Ui.dp(this, 48))
         bubble = view; bubbleParams = p
         positionOverlays()
-        view.setOnClickListener { openSheet() }
+        view.setOnClickListener { openSheet(expanded = suggestionCount > 0) }
         view.setOnTouchListener(object : View.OnTouchListener {
             var x = 0f; var y = 0f; var initialX = 0; var initialY = 0; var moved = false
             override fun onTouch(v: View, event: MotionEvent): Boolean {
@@ -620,17 +705,41 @@ class WriterAccessibilityService : AccessibilityService() {
 
     private fun updateBubble() {
         bubble?.update(suggestionCount, checkState)
+        scheduleEmptyPillMinimize()
     }
 
-    private fun typingVisible(): Boolean {
+    private fun shouldMinimizeEmptyPill(): Boolean {
+        val result = issueStore.current
+        return connected && sheet != null && compactSheet && !promptFocused && !fieldReadPending &&
+            !result.pending && !result.unavailable && result.issues.isEmpty() &&
+            (checkState == WritingCheckState.READY || checkState == WritingCheckState.IDLE)
+    }
+
+    private fun cancelEmptyPillMinimize() {
+        Engine.main.removeCallbacks(minimizeEmptyPill)
+        emptyPillMinimizeScheduled = false
+    }
+
+    private fun scheduleEmptyPillMinimize() {
+        if (!shouldMinimizeEmptyPill()) { cancelEmptyPillMinimize(); return }
+        if (emptyPillMinimizeScheduled) return
+        emptyPillMinimizeScheduled = true
+        Engine.main.postDelayed(minimizeEmptyPill, 3000)
+    }
+
+    private fun imeVisible(): Boolean {
         if (!connected || !unlocked()) return false
-        if (runCatching {
+        return runCatching {
             windows.any { window ->
                 if (window.type != AccessibilityWindowInfo.TYPE_INPUT_METHOD) false
                 else Rect().let { bounds -> window.getBoundsInScreen(bounds); !bounds.isEmpty }
             }
-        }.getOrDefault(false)) return true
-        if (wm.currentWindowMetrics.windowInsets.isVisible(WindowInsets.Type.ime())) return true
+        }.getOrDefault(false) || wm.currentWindowMetrics.windowInsets.isVisible(WindowInsets.Type.ime())
+    }
+
+    private fun typingVisible(): Boolean {
+        if (!connected || !unlocked()) return false
+        if (imeVisible()) return true
         // A physical keyboard has no on-screen IME window. A live editor still
         // defines a typing session when the hardware keyboard is available.
         val config = resources.configuration
@@ -643,19 +752,22 @@ class WriterAccessibilityService : AccessibilityService() {
         bubble = null; bubbleParams = null
     }
 
-    private fun openSheet() {
+    private fun openSheet(expanded: Boolean = false) {
         if (sheet != null) { closeSheet(); return }
         // Refresh before opening: a bubble click may race the next text/focus event or its debounce.
         refreshField()
         val current = snapshot ?: return
+        autoPillShown = true
         highlights.clear()
         compactSheet = true
+        rememberKeyboardHeight()
+        expandedSheetHeight = defaultSheetHeight()
         sheetAnchorX = bubbleParams?.x ?: dragX
         sheetAnchorY = bubbleParams?.y ?: dragY
         sheetOnRight = sheetAnchorX < 0 || sheetAnchorX > wm.currentWindowMetrics.bounds.width() / 2
         val radius = Ui.dp(this,28).toFloat()
         fun sheetBackground() = GradientDrawable().apply {
-            setColor(Color.WHITE); cornerRadii = floatArrayOf(radius,radius,radius,radius,0f,0f,0f,0f)
+            setColor(OverlayUi.floatingSurface(this@WriterAccessibilityService)); cornerRadii = floatArrayOf(radius,radius,radius,radius,0f,0f,0f,0f)
         }
         val root = Ui.column(this, 0).apply {
             background = null
@@ -664,17 +776,48 @@ class WriterAccessibilityService : AccessibilityService() {
         val handleArea = android.widget.FrameLayout(this).apply {
             visibility = View.GONE
             addView(View(this@WriterAccessibilityService).apply {
-                background = Ui.background(Color.rgb(46,46,46),Ui.dp(this@WriterAccessibilityService,2))
+                background = Ui.background(OverlayUi.floatingLine(this@WriterAccessibilityService),Ui.dp(this@WriterAccessibilityService,2))
             }, android.widget.FrameLayout.LayoutParams(Ui.dp(this@WriterAccessibilityService,32),Ui.dp(this@WriterAccessibilityService,4),Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = Ui.dp(this@WriterAccessibilityService,8)
             })
-            contentDescription = "Drag down to close suggestions"
+            contentDescription = "Drag up to resize suggestions; drag down to close menu"
             setOnTouchListener(object : View.OnTouchListener {
                 var start = 0f
+                var startHeight = 0
+                var moved = false
                 override fun onTouch(view: View, event: MotionEvent): Boolean {
+                    if (sheetDismissing) return true
                     when (event.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> start = event.rawY
-                        MotionEvent.ACTION_UP -> if (event.rawY - start > Ui.dp(this@WriterAccessibilityService,32)) closeSheet()
+                        MotionEvent.ACTION_DOWN -> {
+                            root.animate().cancel()
+                            root.translationY = 0f
+                            start = event.rawY; startHeight = sheetParams?.height ?: 0; moved = false
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val delta = event.rawY - start
+                            if (abs(delta) > Ui.dp(this@WriterAccessibilityService, 8)) moved = true
+                            if (moved) {
+                                root.translationY = delta.coerceAtLeast(0f)
+                                expandedSheetHeight = (startHeight - minOf(delta,0f)).toInt().coerceIn(
+                                    minOf(Ui.dp(this@WriterAccessibilityService,160),usableScreenHeight()),usableScreenHeight())
+                                positionOverlays()
+                            }
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            val downward = event.rawY - start
+                            val threshold = minOf(Ui.dp(this@WriterAccessibilityService,64).toFloat(),startHeight*.2f)
+                                .coerceAtLeast(Ui.dp(this@WriterAccessibilityService,24).toFloat())
+                            if (moved && downward >= threshold) {
+                                dismissSheet()
+                            } else {
+                                root.animate().translationY(0f).setDuration(160).withEndAction(null).start()
+                                if (!moved) view.performClick()
+                            }
+                        }
+                        MotionEvent.ACTION_CANCEL -> {
+                            moved = false
+                            root.animate().translationY(0f).setDuration(160).withEndAction(null).start()
+                        }
                     }
                     return true
                 }
@@ -682,7 +825,7 @@ class WriterAccessibilityService : AccessibilityService() {
         }
         root.addView(handleArea,LinearLayout.LayoutParams(-1,Ui.dp(this,24)))
         panelSnapshot = current
-        val assistant = AssistantPanel(this, ::apply, ::closeSheet, highlight = { edits ->
+        val assistant = AssistantPanel(this, ::apply, ::dismissSheet, highlight = { edits ->
             checkedSnapshot = panelSnapshot; fieldEdits = edits
             redrawHighlights()
         }, count = { count -> suggestionCount = count; updateBubble() }, selection = {
@@ -702,19 +845,86 @@ class WriterAccessibilityService : AccessibilityService() {
             },
             "Disable in this app" to { snapshot?.pkg?.let { prefs.block(it, true) }; clearField() }
         ), overlayStyle = true, modeChanged = { compact ->
-            compactSheet = compact; handleArea.visibility = if (compact) View.GONE else View.VISIBLE
+            val wasCompact = compactSheet
+            compactSheet = compact
+            if (compact) setPromptFocused(false)
+            else if (wasCompact) {
+                rememberKeyboardHeight()
+                expandedSheetHeight = defaultSheetHeight()
+                // Keep the host editor and IME active. The nonfocusable menu
+                // covers the keyboard area without resizing the host composer.
+            }
+            handleArea.visibility = if (compact) View.GONE else View.VISIBLE
             root.background = if (compact) null else sheetBackground()
             positionOverlays()
-        }, inlineRight = sheetOnRight, inlineDrag = ::bindInlineDrag,
-            sharedStore = issueStore, requestCheck = { refreshField(); startAnalysis(0) })
+            scheduleEmptyPillMinimize()
+        }, inputFocusChanged = ::setPromptFocused, inlineDrag = ::bindInlineDrag, inlineWidthChanged = { width ->
+            if (compactWidth != width) { compactWidth = width; positionOverlays() }
+        },
+            sharedStore = issueStore, requestCheck = { refreshField(); startAnalysis(0) }, expandForScroll = {
+                if (!compactSheet) {
+                    val required = (panel?.expandedContentHeight() ?: expandedSheetHeight) + Ui.dp(this,24)
+                    expandedSheetHeight = maxOf(expandedSheetHeight,minOf(required,usableScreenHeight()))
+                    positionOverlays()
+                }
+            })
         root.addView(assistant, LinearLayout.LayoutParams(-1, 0, 1f))
         panel = assistant; sheet = root
         sheetParams = overlayParams(-1, Ui.dp(this, 360))
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            root.post { if (sheet === root) positionOverlays() }
+            insets
+        }
         positionOverlays()
         if (runCatching { wm.addView(root, sheetParams) }.isFailure) { closeSheet(); return }
         hideBubble()
         assistant.acceptAnalysis(current.text, issueStore.current)
+        if (expanded) assistant.openSuggestions()
+        scheduleEmptyPillMinimize()
     }
+
+    private fun setPromptFocused(focused: Boolean) {
+        if (promptFocused == focused) return
+        promptFocused = focused
+        val params = sheetParams ?: return
+        params.flags = if (focused) params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            else params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        if (!focused) {
+            sheet?.windowToken?.let { token ->
+                getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(token, 0)
+            }
+        }
+        sheet?.takeIf { it.isAttachedToWindow }?.let { runCatching { wm.updateViewLayout(it, params) } }
+        positionOverlays()
+        scheduleRefresh(80)
+    }
+
+    private fun usableScreenHeight(): Int {
+        val metrics = wm.currentWindowMetrics
+        val insets = metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+        return (metrics.bounds.height() - insets.top - insets.bottom).coerceAtLeast(1)
+    }
+
+    private fun rememberKeyboardHeight() {
+        val metrics = wm.currentWindowMetrics
+        val bars = metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+        val screenBottom = metrics.bounds.height() - bars.bottom
+        var visibleHeight = 0
+        runCatching {
+            for (window in windows) if (window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
+                val rect = Rect(); window.getBoundsInScreen(rect)
+                if (!rect.isEmpty) visibleHeight = maxOf(visibleHeight,minOf(rect.bottom,screenBottom)-maxOf(rect.top,bars.top))
+            }
+        }
+        for (insets in listOfNotNull(metrics.windowInsets,sheet?.rootWindowInsets)) {
+            if (insets.isVisible(WindowInsets.Type.ime()))
+                visibleHeight = maxOf(visibleHeight,insets.getInsets(WindowInsets.Type.ime()).bottom-bars.bottom)
+        }
+        if (visibleHeight >= Ui.dp(this,100)) keyboardHeight = visibleHeight.coerceAtMost(usableScreenHeight())
+    }
+
+    private fun defaultSheetHeight(): Int =
+        (if (keyboardHeight > 0) keyboardHeight else Ui.dp(this,280)).coerceAtMost(usableScreenHeight())
 
     private fun bindInlineDrag(view: View) {
         view.setOnTouchListener(object : View.OnTouchListener {
@@ -752,44 +962,71 @@ class WriterAccessibilityService : AccessibilityService() {
     /** Keep touch targets above both the IME window and system/cutout insets. */
     private fun positionOverlays() {
         if (!connected) return
-        val bounds = wm.currentWindowMetrics.bounds
-        val insets = wm.currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(
+        rememberKeyboardHeight()
+        val metrics = wm.currentWindowMetrics
+        val bounds = metrics.bounds
+        val insets = metrics.windowInsets.getInsetsIgnoringVisibility(
             WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
         val left = insets.left + Ui.dp(this, 8); val right = bounds.width() - insets.right - Ui.dp(this, 8)
         val top = insets.top + Ui.dp(this, 8)
-        var bottom = bounds.height() - insets.bottom - Ui.dp(this, 8)
-        runCatching {
-            for (window in windows) if (window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
-                val rect = Rect(); window.getBoundsInScreen(rect)
-                if (!rect.isEmpty && rect.top > top) bottom = minOf(bottom, rect.top - Ui.dp(this, 8))
+        val screenBottom = bounds.height() - insets.bottom
+        var bottom = screenBottom - Ui.dp(this, 8)
+        // The review sheet covers the keyboard while leaving the host IME active,
+        // preserving the editor/composer position. Only the compact surface and
+        // our focused rewrite prompt avoid the IME.
+        if (sheet == null || compactSheet || promptFocused) {
+            runCatching {
+                for (window in windows) if (window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
+                    val rect = Rect(); window.getBoundsInScreen(rect)
+                    if (!rect.isEmpty && rect.top > top) bottom = minOf(bottom, rect.top - Ui.dp(this, 8))
+                }
             }
+            fun visibleImeBottom(windowInsets: WindowInsets?): Int =
+                if (windowInsets?.isVisible(WindowInsets.Type.ime()) == true) windowInsets.getInsets(WindowInsets.Type.ime()).bottom else 0
+            val imeInset = maxOf(visibleImeBottom(metrics.windowInsets),visibleImeBottom(sheet?.rootWindowInsets))
+            if (imeInset > 0) bottom = minOf(bottom, bounds.height() - imeInset - Ui.dp(this, 8))
         }
-        val imeInset = wm.currentWindowMetrics.windowInsets.getInsets(WindowInsets.Type.ime()).bottom
-        if (imeInset > 0) bottom = minOf(bottom, bounds.height() - imeInset - Ui.dp(this, 8))
         bubbleParams?.let { p ->
             p.x = (if (dragX < 0) right - p.width else dragX).coerceIn(left, maxOf(left, right - p.width))
-            p.y = (if (dragY < 0) bottom - p.height else dragY).coerceIn(top, maxOf(top, bottom - p.height))
+            p.y = (if (dragY < 0) bottom - p.height - Ui.dp(this,32) else dragY).coerceIn(top, maxOf(top, bottom - p.height))
             bubble?.takeIf { it.isAttachedToWindow }?.let { runCatching { wm.updateViewLayout(it, p) } }
         }
         sheetParams?.let { p ->
             if (compactSheet) {
-                p.width = minOf(right-left,bounds.width()/2+Ui.dp(this,80))
-                p.height = minOf(Ui.dp(this,56),maxOf(Ui.dp(this,32),bottom-top))
+                p.width = minOf(right-left,maxOf(Ui.dp(this,194),compactWidth))
+                p.height = minOf(Ui.dp(this,48),maxOf(Ui.dp(this,32),bottom-top))
                 val anchor = if (sheetAnchorX < 0) right-Ui.dp(this,48) else sheetAnchorX
                 val x = if (sheetOnRight) anchor+Ui.dp(this,48)-p.width else anchor
                 p.x = x.coerceIn(left,maxOf(left,right-p.width))
-                p.y = (if (sheetAnchorY < 0) bottom-p.height else sheetAnchorY).coerceIn(top,maxOf(top,bottom-p.height))
+                p.y = (if (sheetAnchorY < 0) bottom-p.height-Ui.dp(this,32) else sheetAnchorY).coerceIn(top,maxOf(top,bottom-p.height))
             } else {
                 p.width = maxOf(Ui.dp(this,120),bounds.width()-insets.left-insets.right)
-                val sheetBottom = bottom+Ui.dp(this,8)
-                p.height = maxOf(Ui.dp(this,80),sheetBottom-top)
-                p.x = insets.left; p.y = maxOf(top,sheetBottom-p.height)
+                val sheetTop = insets.top
+                val sheetBottom = if (promptFocused) bottom + Ui.dp(this,8) else screenBottom
+                val available = (sheetBottom - sheetTop).coerceAtLeast(1)
+                val requested = expandedSheetHeight
+                p.height = requested.coerceIn(minOf(Ui.dp(this,160), available), available)
+                p.x = insets.left; p.y = maxOf(sheetTop, sheetBottom-p.height)
             }
             sheet?.takeIf { it.isAttachedToWindow }?.let { runCatching { wm.updateViewLayout(it, p) } }
         }
     }
 
+    private fun dismissSheet() {
+        val root = sheet ?: return
+        if (compactSheet) { closeSheet(); return }
+        if (sheetDismissing) return
+        sheetDismissing = true
+        cancelEmptyPillMinimize()
+        root.animate().cancel()
+        root.animate().translationY(maxOf(root.height,sheetParams?.height ?: 0).toFloat())
+            .setDuration(180).withEndAction { if (sheet === root) closeSheet() }.start()
+    }
+
     private fun closeSheet() {
+        sheetDismissing = false
+        sheet?.animate()?.cancel()
+        cancelEmptyPillMinimize()
         val current = snapshot
         val previous = panelSnapshot
         val cached = if (current != null && previous != null && sameTarget(previous, current) &&
@@ -797,7 +1034,7 @@ class WriterAccessibilityService : AccessibilityService() {
         val wasOpen = sheet != null
         panel?.dispose(); panel = null; panelSnapshot = null
         sheet?.let { if (connected) runCatching { wm.removeViewImmediate(it) } }
-        sheet = null; sheetParams = null; compactSheet = false
+        sheet = null; sheetParams = null; compactSheet = false; promptFocused = false
         if (connected && wasOpen && current != null) {
             if (cached != null) {
                 checkedSnapshot = current.copy(revision = revision); fieldEdits = cached
@@ -808,7 +1045,8 @@ class WriterAccessibilityService : AccessibilityService() {
         if (connected) redrawHighlights()
     }
     private fun clearField() {
-        transientReadStarted = 0L; fieldReadPending = false
+        autoPillShown = false
+        transientReadAttempts = 0; fieldReadPending = false
         invalidateResults(); Engine.main.removeCallbacks(refresh); Engine.main.removeCallbacks(confirmUndo)
         issueStore.reset()
         snapshot = null; retainedNode?.recycle(); retainedNode = null; undo = null

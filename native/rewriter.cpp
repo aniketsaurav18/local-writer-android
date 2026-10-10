@@ -5,6 +5,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 static std::mutex mutex;
 static std::atomic<uint64_t> cancel_epoch{0};

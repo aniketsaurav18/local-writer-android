@@ -9,7 +9,7 @@ import android.os.SystemClock
 import android.view.View
 
 /** A small visible badge inside a larger transparent touch target. */
-class WritingWidget(context: Context) : View(context) {
+class WritingWidget(context: Context, private val inline: Boolean = false) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val logo = context.getDrawable(R.drawable.ic_writer_widget)!!
     private val density = resources.displayMetrics.density
@@ -34,8 +34,9 @@ class WritingWidget(context: Context) : View(context) {
         super.onDraw(canvas)
         val cx = width / 2f; val cy = height / 2f
         val radius = 15f * density
-        paint.style = Paint.Style.FILL; paint.color = GREEN
+        paint.style = Paint.Style.FILL; paint.color = if (count > 0) CORAL else GREEN
         canvas.drawCircle(cx, cy, radius, paint)
+        if (inline) canvas.drawRect(cx-radius,cy,cx,cy+radius,paint)
         paint.color = Color.WHITE
         when {
             state == WritingCheckState.CHECKING || state == WritingCheckState.PARTIAL -> {
@@ -62,7 +63,7 @@ class WritingWidget(context: Context) : View(context) {
     }
 
     private fun drawLabel(canvas: Canvas, text: String, cx: Float, cy: Float) {
-        paint.style = Paint.Style.FILL; paint.color = Color.WHITE
+        paint.style = Paint.Style.FILL; paint.color = if (count > 0) 0xff202020.toInt() else Color.WHITE
         paint.typeface = font
         paint.textSize = fontSize
         // Preserve the circle with enlarged system fonts and the three-character cap.
@@ -72,5 +73,8 @@ class WritingWidget(context: Context) : View(context) {
         canvas.drawText(text, cx, cy - (paint.ascent() + paint.descent()) / 2f, paint)
     }
 
-    companion object { const val GREEN = 0xff027e6f.toInt() }
+    companion object {
+        const val GREEN = 0xff027e6f.toInt()
+        const val CORAL = 0xffff7974.toInt()
+    }
 }

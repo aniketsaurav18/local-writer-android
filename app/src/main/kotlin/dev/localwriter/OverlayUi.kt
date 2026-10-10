@@ -1,6 +1,7 @@
 package dev.localwriter
 
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -17,6 +18,13 @@ object OverlayUi {
     const val RED = 0xffd43147.toInt()
     const val GREEN = WritingWidget.GREEN
 
+    fun dark(c: Context) = c.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+    fun floatingSurface(c: Context) = if (dark(c)) 0xff1e1e1e.toInt() else Color.WHITE
+    fun floatingInk(c: Context) = if (dark(c)) 0xfff5f5f5.toInt() else INK
+    fun floatingMuted(c: Context) = if (dark(c)) 0xffbdbdbd.toInt() else MUTED
+    fun floatingLine(c: Context) = if (dark(c)) 0xff565656.toInt() else 0xffd4d4d4.toInt()
+    fun floatingCorrection(c: Context) = if (dark(c)) 0xff91e0bc.toInt() else GREEN
+
     fun text(c: Context, value: CharSequence, size: Float = 14f, color: Int = INK, medium: Boolean = false) = TextView(c).apply {
         text = value; textSize = size; setTextColor(color); includeFontPadding = false
         typeface = c.resources.getFont(if (medium) R.font.inter_medium else R.font.inter_regular)
@@ -28,16 +36,18 @@ object OverlayUi {
         setLineHeight(Ui.dp(c,24))
     }
 
-    fun action(c: Context, value: String, primary: Boolean = false, click: () -> Unit) = text(c,value,14f,if (primary) Color.WHITE else INK,true).apply {
+    fun action(c: Context, value: String, primary: Boolean = false, floating: Boolean = false, click: () -> Unit) = text(c,value,14f,if (floating) { if (primary) 0xff122522.toInt() else accent(c) } else if (primary) Color.WHITE else INK,true).apply {
         gravity = Gravity.CENTER; minHeight = Ui.dp(c,36)
         setPadding(Ui.dp(c,16),Ui.dp(c,8),Ui.dp(c,16),Ui.dp(c,8))
         val shape = GradientDrawable().apply {
-            setColor(if (primary) GREEN else Color.WHITE); cornerRadius = Ui.dp(c,24).toFloat()
-            if (!primary) setStroke(Ui.dp(c,1),LINE)
+            setColor(if (floating) { if (primary) accent(c) else Color.TRANSPARENT } else if (primary) GREEN else Color.WHITE); cornerRadius = Ui.dp(c,24).toFloat()
+            if (!primary && !floating) setStroke(Ui.dp(c,1),LINE)
         }
         background = RippleDrawable(ColorStateList.valueOf(0x1a000000),shape,null)
         setOnClickListener { click() }; isFocusable = false
     }
+
+    fun accent(c: Context) = if (dark(c)) 0xff28c4b5.toInt() else GREEN
 
     fun icon(c: Context, glyph: String, description: String, click: () -> Unit) = text(c,glyph,22f,INK).apply {
         gravity = Gravity.CENTER; contentDescription = description
