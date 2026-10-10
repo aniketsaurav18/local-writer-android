@@ -1,7 +1,6 @@
 package dev.localwriter
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.InputMethod
 import android.app.KeyguardManager
@@ -73,9 +72,6 @@ class WriterAccessibilityService : AccessibilityService() {
     private var dragX = -1
     private var dragY = -1
     private val refresh = Runnable { refreshField() }
-    private val shortcutCallback = object : AccessibilityButtonController.AccessibilityButtonCallback() {
-        override fun onClicked(controller: AccessibilityButtonController) { if (connected) openSheet() }
-    }
     private val resume = Runnable { scheduleRefresh() }
     private val confirmUndo = Runnable {
         val last = undo
@@ -129,7 +125,6 @@ class WriterAccessibilityService : AccessibilityService() {
         prefs = Prefs(this); wm = getSystemService(WindowManager::class.java); analysis = AnalysisSession(this)
         highlights = TextHighlightOverlay(this, wm)
         connected = true
-        accessibilityButtonController.registerAccessibilityButtonCallback(shortcutCallback, Engine.main)
         serviceInfo = serviceInfo.apply {
             flags = flags or AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR or
                 AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
@@ -707,7 +702,6 @@ class WriterAccessibilityService : AccessibilityService() {
         if (connected) {
             highlights.dispose()
             prefs.store.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-            accessibilityButtonController.unregisterAccessibilityButtonCallback(shortcutCallback)
         }
         if (receiverRegistered) runCatching { unregisterReceiver(screenReceiver) }
         receiverRegistered = false; connected = false; accessibilityIme = null; editor = null
