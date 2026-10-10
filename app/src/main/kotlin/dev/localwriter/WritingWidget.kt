@@ -8,8 +8,6 @@ import android.graphics.RectF
 import android.os.SystemClock
 import android.view.View
 
-enum class WritingCheckState { IDLE, CHECKING, PARTIAL, READY, UNAVAILABLE }
-
 /** A small visible badge inside a larger transparent touch target. */
 class WritingWidget(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)

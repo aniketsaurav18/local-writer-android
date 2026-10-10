@@ -174,10 +174,10 @@ class AssistantPanel(
         val old = source.substring(e.begin,e.end).trim()
         val replacement = e.replacement.trim()
         return when {
+            (old + replacement).none(Char::isLetterOrDigit) -> "Punctuation"
             old.isEmpty() && replacement.lowercase() in listOf("a","an","the") -> "Add article"
             old.isEmpty() -> "Add missing text"
             replacement.isEmpty() -> "Remove extra text"
-            (old + replacement).none(Char::isLetterOrDigit) -> "Punctuation"
             else -> "Suggested correction"
         }
     }
@@ -186,7 +186,7 @@ class AssistantPanel(
         if (!e.actionable) return SpannableString(source.substring(e.begin,e.end))
         val old = source.substring(e.begin,e.end).trim()
         val replacement = e.replacement.trim()
-        val gap = if (old.isNotEmpty() && replacement.isNotEmpty()) " " else ""
+        val gap = if (old.isNotEmpty() && replacement.isNotEmpty()) " → " else ""
         val text = SpannableString(old + gap + replacement)
         if (old.isNotEmpty()) {
             text.setSpan(ForegroundColorSpan(OverlayUi.RED),0,old.length,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -328,19 +328,12 @@ class AssistantPanel(
         var end = (e.end+around).coerceAtMost(source.length)
         if (start > 0 && source[start].isLowSurrogate()) start--
         if (end < source.length && source[end].isLowSurrogate()) end++
-        val old = source.substring(e.begin,e.end)
         if (!e.actionable) return SpannableString(source.substring(start,end)).apply {
             if (e.end > e.begin) setSpan(ForegroundColorSpan(OverlayUi.RED),e.begin-start,e.end-start,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
-        val separator = if (old.isNotEmpty() && e.replacement.isNotEmpty() && !old.last().isWhitespace()) " " else ""
         val prefix = (if (start > 0) "…" else "") + source.substring(start,e.begin)
-        val text = SpannableString(prefix + old + separator + e.replacement + source.substring(e.end,end) + if (end < source.length) "…" else "")
-        val oldStart = prefix.length; val oldEnd = oldStart+old.length
-        if (oldEnd > oldStart) {
-            text.setSpan(ForegroundColorSpan(OverlayUi.RED),oldStart,oldEnd,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            text.setSpan(StrikethroughSpan(),oldStart,oldEnd,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
-        val newStart = oldEnd+separator.length; val newEnd = newStart+e.replacement.length
+        val text = SpannableString(prefix + e.replacement + source.substring(e.end,end) + if (end < source.length) "…" else "")
+        val newStart = prefix.length; val newEnd = newStart+e.replacement.length
         if (newEnd > newStart) {
             text.setSpan(ForegroundColorSpan(OverlayUi.GREEN),newStart,newEnd,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             text.setSpan(BackgroundColorSpan(0xffe9f6ef.toInt()),newStart,newEnd,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -360,6 +353,7 @@ class AssistantPanel(
         card.addView(category)
         card.addView(View(context),LayoutParams(1,Ui.dp(context,12)))
         card.addView(OverlayUi.text(context,contextEdit(e,if (expanded) 50 else 24),16f).apply {
+            contentDescription = if (e.actionable) "Suggested text: $text" else text.toString()
             setLineHeight(Ui.dp(context,24))
             if (!expanded) { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }
             setPadding(0,0,0,Ui.dp(context,16))
@@ -367,6 +361,11 @@ class AssistantPanel(
         card.setOnClickListener { if (expanded) { selected = null; renderCorrections() } else selectCard(e) }
         card.contentDescription = if (expanded) "Collapse correction" else "Expand correction"
         if (expanded) {
+            if (e.actionable) card.addView(OverlayUi.text(context,shortEdit(e),13f).apply {
+                setPadding(0,0,0,Ui.dp(context,12))
+                contentDescription = "Change: " + source.substring(e.begin,e.end).trim().ifEmpty { "Insert" } +
+                    " to " + e.replacement.trim().ifEmpty { "remove" }
+            })
             if (e.explanation.isNotBlank()) card.addView(OverlayUi.text(context,e.explanation,13f,OverlayUi.MUTED).apply { setPadding(0,0,0,Ui.dp(context,12)) })
             for (choice in e.choices.drop(1)) card.addView(OverlayUi.action(context,"Use: ${choice.ifEmpty { "Remove" }}") { replace(listOf(e.copy(replacement = choice, alternatives = emptyList()))) })
             val actions = Ui.row(context).apply {

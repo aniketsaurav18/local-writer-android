@@ -299,7 +299,7 @@ class MainActivity : Activity() {
         controls.addView(Ui.text(this, if (prefs.pauseUntil > System.currentTimeMillis()) "Paused until ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(prefs.pauseUntil))}" else "Assistant is available", 13f, Ui.MUTED))
         Ui.addRow(controls, Ui.button(this, "Pause 30 minutes") { prefs.pauseUntil = System.currentTimeMillis() + 30 * 60_000; refreshAnalysis(); showTab(2) }, Ui.button(this, "Resume") { prefs.pauseUntil = 0; refreshAnalysis(); showTab(2) })
         addChoice(controls, "English dialect", listOf("American", "British", "Indian", "Australian", "Canadian"), prefs.dialect) { prefs.dialect = it; if (prefs.allowed(packageName)) panel.update(editor.text.toString(), true) }
-        val checkingModes = mapOf("Contextual" to "T5", "Legacy" to "Tagger", "Off" to "Off")
+        val checkingModes = mapOf("Contextual" to "T5", "Off" to "Off")
         addChoice(controls, "Contextual checking", checkingModes.keys.toList(), checkingModes.entries.firstOrNull { it.value == prefs.contextModel }?.key ?: "Contextual") {
             prefs.contextModel = checkingModes.getValue(it); if (prefs.allowed(packageName)) panel.update(editor.text.toString(), true)
         }

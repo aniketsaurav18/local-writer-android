@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Give Kotlin Language Server the dependencies used by tools/build.py."""
+from pathlib import Path
+import os
+import subprocess
+import sys
+
+root = Path(__file__).resolve().parent
+sdk = Path(os.environ.get('ANDROID_SDK_ROOT', Path.home() / 'Android/Sdk'))
+android = sdk / 'platforms/android-36/android.jar'
+libs = root / '.cache/kotlinc/lib'
+dependencies = [
+    android,
+    libs / 'kotlin-stdlib.jar', libs / 'kotlin-stdlib-jdk7.jar',
+    libs / 'kotlin-stdlib-jdk8.jar', libs / 'annotations-13.0.jar',
+]
+missing = [str(path) for path in dependencies if not path.is_file()]
+resource_source = root / 'build/generated/dev/localwriter/R.java'
+if missing or not resource_source.is_file():
+    print('Editor dependencies are missing. Prepare dependencies and run python3 tools/build.py first.', file=sys.stderr)
+    for path in missing:
+        print(path, file=sys.stderr)
+    sys.exit(1)
+
+# Only generated resources belong on the binary classpath. App classes are
+# resolved from live sources, so editor diagnostics cannot use stale app.jar.
+output = root / 'build/editor'
+resource_jar = output / 'android-resources.jar'
+if not resource_jar.exists() or resource_source.stat().st_mtime_ns > resource_jar.stat().st_mtime_ns:
+    classes = output / 'resource-classes'
+    classes.mkdir(parents=True, exist_ok=True)
+    subprocess.run([
+        'javac', '-J-Xmx128m', '--release', '11', '-classpath', str(android),
+        '-d', str(classes), str(resource_source)
+    ], check=True, stdout=sys.stderr, stderr=sys.stderr)
+    subprocess.run([
+        'jar', '-J-Xmx128m', '--create', '--file', str(resource_jar), '-C', str(classes), '.'
+    ], check=True, stdout=sys.stderr, stderr=sys.stderr)
+
+print(os.pathsep.join(map(str, dependencies + [resource_jar])))

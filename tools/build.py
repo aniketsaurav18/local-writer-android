@@ -39,19 +39,21 @@ run('cmake','-S','native','-B','build/native','-DCMAKE_TOOLCHAIN_FILE='+str(NDK/
 run('cmake','--build','build/native','--target','localrewrite','-j','2')
 run(BT/'aapt2','compile','--dir','app/src/main/res','-o',BUILD/'resources.zip')
 generated=BUILD/'generated';generated.mkdir(exist_ok=True)
-run(BT/'aapt2','link','-I',ANDROID,'--manifest','app/src/main/AndroidManifest.xml','--java',generated,'--min-sdk-version','33','--target-sdk-version','36','--version-code','8','--version-name','0.2.0','-o',BUILD/'resources.apk',BUILD/'resources.zip')
+run(BT/'aapt2','link','-I',ANDROID,'--manifest','app/src/main/AndroidManifest.xml','--java',generated,'--min-sdk-version','33','--target-sdk-version','36','--version-code','10','--version-name','0.2.2','-o',BUILD/'resources.apk',BUILD/'resources.zip')
 classes=BUILD/'classes'
 if classes.exists():shutil.rmtree(classes)
 classes.mkdir()
 run('javac','--release','11','-cp',ANDROID,'-d',classes,*generated.rglob('*.java'))
 env=os.environ.copy();env['JAVA_OPTS']='-Xmx640m'
-cmd=[str(kotlinc),'-jvm-target','11','-no-reflect','-classpath',str(ANDROID)+os.pathsep+str(ROOT/'vendor/onnxruntime.jar')+os.pathsep+str(classes),'-d',str(classes),*map(str,sorted((ROOT/'app/src/main/kotlin').rglob('*.kt')))]
+cmd=[str(kotlinc),'-jvm-target','11','-no-reflect','-classpath',str(ANDROID)+os.pathsep+str(classes),'-d',str(classes),*map(str,sorted((ROOT/'app/src/main/kotlin').rglob('*.kt')))]
 subprocess.run(cmd,check=True,env=env)
 run('jar','cf',BUILD/'app.jar','-C',classes,'.')
-dex=BUILD/'dex';dex.mkdir(exist_ok=True)
+dex=BUILD/'dex'
+if dex.exists():shutil.rmtree(dex)
+dex.mkdir()
 libs=ROOT/'.cache/kotlinc/lib'
 stdlib=[libs/'kotlin-stdlib.jar',libs/'kotlin-stdlib-jdk7.jar',libs/'kotlin-stdlib-jdk8.jar']
-run(BT/'d8','--min-api','33','--lib',ANDROID,'--output',dex,BUILD/'app.jar','vendor/onnxruntime.jar',*stdlib)
+run(BT/'d8','--min-api','33','--lib',ANDROID,'--output',dex,BUILD/'app.jar',*stdlib)
 unsigned=BUILD/'local-writer-unsigned.apk'
 with zipfile.ZipFile(unsigned,'w',allowZip64=False) as z:
     with zipfile.ZipFile(BUILD/'resources.apk') as resources:
@@ -59,9 +61,6 @@ with zipfile.ZipFile(unsigned,'w',allowZip64=False) as z:
     for f in dex.glob('*.dex'):z.write(f,f.name,compress_type=zipfile.ZIP_DEFLATED)
     for f in (ROOT/'app/src/main/assets').rglob('*'):
         if f.is_file():z.write(f,'assets/'+str(f.relative_to(ROOT/'app/src/main/assets')),compress_type=zipfile.ZIP_STORED)
-    with zipfile.ZipFile(ROOT/'vendor/onnxruntime-android-1.23.2.aar') as aar:
-        for name in ['libonnxruntime.so','libonnxruntime4j_jni.so']:
-            z.writestr('lib/arm64-v8a/'+name,aar.read('jni/arm64-v8a/'+name),compress_type=zipfile.ZIP_STORED)
     z.write(BUILD/'native/liblocalrewrite.so','lib/arm64-v8a/liblocalrewrite.so',compress_type=zipfile.ZIP_STORED)
     z.write(BUILD/'harper/android/liblocalharper.so','lib/arm64-v8a/liblocalharper.so',compress_type=zipfile.ZIP_STORED)
 run(BT/'zipalign','-f','-P','16','4',unsigned,BUILD/'local-writer-aligned.apk')

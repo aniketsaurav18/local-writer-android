@@ -1,5 +1,7 @@
 # Offline checking research and proposed architecture
 
+Implementation update (0.2.2): Harper and Unbabel T5 now supply the active checking paths through Rust/JNI and llama.cpp. The migration baseline ONNX tagger and old frequency spelling checker have been removed, together with ONNX Runtime and their assets. The comparisons below retain the original research context.
+
 Implementation follow-up: version 0.2.0 implements the Harper + Unbabel design below using native Rust/JNI and a T5 Q8_0 GGUF adapter in the existing llama.cpp runtime. The descriptions of the former app are the source audit that motivated this work. See [Harper implementation](HARPER_INTEGRATION.md), [T5 integration](CONTEXT_MODEL.md) and [build record](VALIDATION.md). Compilation and static packaging checks do not establish model quality or real-device behavior.
 
 Research date: 2026-10-10. Scope: the supplied article, every listed engine/checkpoint, our current Kotlin implementation, and Android integration. This is a recommendation, not a completed engine migration. No model inference, app tests, emulator, phone interactions, or performance benchmarks were run. Upstream source inspection was sufficient to assess the architectural hypotheses; compilation and correction quality remain open.

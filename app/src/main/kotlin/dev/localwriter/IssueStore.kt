@@ -48,13 +48,34 @@ class IssueStore {
             (issue.end == text.length || !text[issue.end].isLowSurrogate())
 
         fun merge(text: String, issues: List<Edit>): List<Edit> {
+            val valid = issues.filter { valid(text, it) }
             val merged = linkedMapOf<String, Edit>()
-            for (issue in issues.filter { valid(text, it) }.sortedWith(compareBy<Edit> { it.engine != "harper" }.thenBy { it.priority })) {
+            for (issue in valid.sortedWith(compareBy<Edit> { it.engine != "harper" }.thenBy { it.priority })) {
                 val key = if (issue.actionable) "${issue.begin}:${issue.end}:edit" else "${issue.begin}:${issue.end}:${issue.ruleId}"
                 val previous = merged[key]
                 merged[key] = if (previous != null && previous.actionable && issue.actionable) {
-                    previous.copy(alternatives = (previous.choices + issue.choices).distinct().filter { it != previous.replacement })
+                    // SplitWords guesses a missing space from dictionary halves.
+                    // A competing whole-word spelling correction gets first choice;
+                    // keep the split as a reviewable alternative.
+                    val preferred = if (previous.engine == "harper" && previous.ruleId == "SplitWords" &&
+                        issue.engine == "harper" && issue.category == "Spelling") issue else previous
+                    preferred.copy(alternatives = (previous.choices + issue.choices).distinct().filter { it != preferred.replacement })
                 } else previous ?: issue
+            }
+            // Context may disambiguate a basic spelling candidate, but may not
+            // invent a new primary correction or override an unrelated phrase.
+            for ((key, issue) in merged.toMap()) {
+                if (!issue.actionable || issue.engine != "harper" ||
+                    !text.substring(issue.begin, issue.end).matches(Regex("[\\p{L}\\p{M}’'-]+"))) continue
+                val basic = valid.filter { it.actionable && it.engine == "harper" &&
+                    it.begin == issue.begin && it.end == issue.end && it.category in listOf("Spelling", "Typo") }
+                val contextual = valid.firstOrNull { it.actionable && it.engine == "t5" &&
+                    it.begin == issue.begin && it.end == issue.end && it.choices.size == 1 &&
+                    basic.any { candidate -> it.replacement in candidate.choices } } ?: continue
+                val preferred = basic.firstOrNull { it.replacement == contextual.replacement } ?: issue.copy(
+                    explanation = "This spelling is supported by the contextual check.")
+                merged[key] = preferred.copy(replacement = contextual.replacement,
+                    alternatives = issue.choices.filter { it != contextual.replacement })
             }
             // A neural phrase and a basic word correction must not count as two
             // independent errors. Prefer the narrower, explained basic finding;

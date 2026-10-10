@@ -1,6 +1,8 @@
-# Local grammar model input and decoding
+# Retired grammar model input and decoding
 
-The bundled artifact is `kotoshu/grammar-en` at revision `7a64ebe0e1944f9de3c5060cb6cdbd0543826002`. Its model, labels and byte-BPE vocabulary remain hash-pinned in `dependencies.lock.json`.
+Historical implementation record: version 0.2.2 removes this engine, its assets and dependency pins. Current contextual checking uses [Unbabel T5-small](CONTEXT_MODEL.md).
+
+The former bundled artifact was `kotoshu/grammar-en` at revision `7a64ebe0e1944f9de3c5060cb6cdbd0543826002`. Its model, labels and byte-BPE vocabulary were hash-pinned in the earlier `dependencies.lock.json`.
 
 Version 0.1.6 corrects general inference mismatches in the original Kotlin implementation:
 

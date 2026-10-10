@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Restore pinned build inputs. Downloads are build-time only, never in the app."""
 from pathlib import Path
-import argparse, hashlib, json, shutil, tarfile, urllib.request, zipfile
+import argparse, hashlib, json, shutil, tarfile, urllib.request
 
 ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--inputs', type=Path, help='Optional supplied project directory; reuse matching files before downloading')
-parser.add_argument('--host-tests', action='store_true', help='Also prepare desktop ONNX/JSON jars for engine tests')
 args = parser.parse_args()
 lock = json.loads((ROOT/'dependencies.lock.json').read_text())
 
@@ -16,7 +15,6 @@ def matches(path, entry):
         return hashlib.file_digest(stream, 'sha256').hexdigest() == entry['sha256']
 
 for entry in lock['files']:
-    if entry['path'].startswith('vendor/host/') and not args.host_tests: continue
     dest = ROOT/entry['path']
     if matches(dest, entry): continue
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -32,9 +30,6 @@ for entry in lock['files']:
         temp.unlink(missing_ok=True)
         raise SystemExit('SHA-256 mismatch: '+entry['path'])
     temp.replace(dest)
-
-with zipfile.ZipFile(ROOT/'vendor/onnxruntime-android-1.23.2.aar') as aar:
-    (ROOT/'vendor/onnxruntime.jar').write_bytes(aar.read('classes.jar'))
 
 llama = ROOT/'vendor/llama.cpp'
 if not (llama/'CMakeLists.txt').exists():

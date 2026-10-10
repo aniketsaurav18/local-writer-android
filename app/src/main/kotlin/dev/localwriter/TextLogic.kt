@@ -70,6 +70,38 @@ object TextLogic {
         }
         return out
     }
+    /** A moved word's removal and insertion are one correction, never separate actions. */
+    fun correctionDiff(old: String, corrected: String, offset: Int = 0): List<Edit> {
+        val edits = diff(old, corrected)
+        val removed = edits.map { edit -> words(old.substring(edit.begin, edit.end))
+            .filter { it.text.any(Char::isLetterOrDigit) }.map { it.text }.toSet() }
+        val added = edits.map { edit -> words(edit.replacement)
+            .filter { it.text.any(Char::isLetterOrDigit) }.map { it.text }.toSet() }
+        val through = IntArray(edits.size) { it }
+        for (i in edits.indices) for (j in i + 1 until edits.size) {
+            if (removed[i].any { it in added[j] } || removed[j].any { it in added[i] })
+                through[i] = maxOf(through[i], j)
+        }
+        val result = mutableListOf<Edit>()
+        var i = 0
+        while (i < edits.size) {
+            var last = through[i]
+            var cursor = i
+            while (cursor <= last) { last = maxOf(last, through[cursor]); cursor++ }
+            val first = edits[i]
+            val combined = if (last == i) first else {
+                val end = edits[last].end
+                val changes = edits.subList(i, last + 1).map {
+                    it.copy(begin = it.begin - first.begin, end = it.end - first.begin)
+                }
+                first.copy(end = end, replacement = apply(old.substring(first.begin, end), changes),
+                    explanation = "Reorder these words together to keep the sentence complete.")
+            }
+            result += combined.copy(begin = combined.begin + offset, end = combined.end + offset)
+            i = last + 1
+        }
+        return result
+    }
     fun apply(text: String, edits: List<Edit>): String {
         var end = text.length; var result = text
         for (e in edits.sortedByDescending { it.begin }) {

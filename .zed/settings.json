@@ -1,0 +1,22 @@
+{
+  "languages": {
+    "Kotlin": {
+      "language_servers": ["kotlin-language-server", "!kotlin-lsp"]
+    }
+  },
+  "lsp": {
+    "kotlin-language-server": {
+      "binary": {
+        "env": {
+          "JAVA_OPTS": "-Xmx512m"
+        }
+      },
+      "settings": {
+        "compiler": {
+          "jvm": { "target": "11" }
+        },
+        "indexing": { "enabled": false }
+      }
+    }
+  }
+}

@@ -39,7 +39,7 @@ class ContextGrammarEngine(dir: File) : AutoCloseable {
                     // Explicitly reject empty generations and unsupported control
                     // text before converting the correction into localized edits.
                     check(corrected.isNotEmpty() && corrected.none { it == '\u0000' }) { "Invalid context correction" }
-                    TextLogic.diff(sentence, corrected).map {
+                    TextLogic.correctionDiff(sentence, corrected).map {
                         it.copy(engine = "t5", category = "Suggested correction")
                     }.also { cache[sentence] = it }
                 }

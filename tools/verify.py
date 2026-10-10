@@ -12,7 +12,7 @@ for name in ['MainActivity','WriterAccessibilityService','WriterKeyboard','BIND_
 for forbidden in ['pairip','Firebase','LicenseActivity','grammarly']:assert forbidden not in m
 with zipfile.ZipFile(a) as z:
     assert not any('pairip' in n for n in z.namelist())
-    for name in ['liblocalrewrite.so','liblocalharper.so','libonnxruntime.so','libonnxruntime4j_jni.so']:assert z.getinfo('lib/arm64-v8a/'+name).file_size>50000
+    for name in ['liblocalrewrite.so','liblocalharper.so']:assert z.getinfo('lib/arm64-v8a/'+name).file_size>50000
     harper=json.loads((r/'build/harper/android/build-info.json').read_text())
     assert hashlib.sha256(z.read('lib/arm64-v8a/liblocalharper.so')).hexdigest() == harper['sha256']
     for notice in (r/'app/src/main/assets/notices').iterdir():

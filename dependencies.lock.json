@@ -1,77 +1,12 @@
 {
   "llama_revision": "aa94f2086147cd4bfbcff818ce998dffce5fcb39",
-  "grammar_revision": "7a64ebe0e1944f9de3c5060cb6cdbd0543826002",
-  "verb_revision": "3d41d2841512d2690cffce1b5ac6795fe9a0a5dd",
   "files": [
-    {
-      "path": "app/src/main/assets/local-model/gec-tagger.int8.onnx",
-      "url": "https://huggingface.co/kotoshu/grammar-en/resolve/7a64ebe0e1944f9de3c5060cb6cdbd0543826002/gec-tagger.int8.onnx",
-      "sha256": "aeaf388ec5642c84957a1ceee8d7093e5da2e537f61f5e9297c7be502fbabd1d",
-      "bytes": 85829734,
-      "source": "model/gec-tagger.int8.onnx"
-    },
-    {
-      "path": "app/src/main/assets/local-model/labels.json",
-      "url": "https://huggingface.co/kotoshu/grammar-en/resolve/7a64ebe0e1944f9de3c5060cb6cdbd0543826002/labels.json",
-      "sha256": "75354812afabf27c4a54d90b8059c951f15f4cd517a99147ba98c76ea2d3b22f",
-      "bytes": 141120,
-      "source": "model/labels.json"
-    },
-    {
-      "path": "app/src/main/assets/local-model/vocab.json",
-      "url": "https://huggingface.co/kotoshu/grammar-en/resolve/7a64ebe0e1944f9de3c5060cb6cdbd0543826002/vocab.json",
-      "sha256": "9e7f63c2d15d666b52e21d250d2e513b87c9b713cfa6987a82ed89e5e6e50655",
-      "bytes": 898823,
-      "source": "model/vocab.json"
-    },
-    {
-      "path": "app/src/main/assets/local-model/merges.txt",
-      "url": "https://huggingface.co/kotoshu/grammar-en/resolve/7a64ebe0e1944f9de3c5060cb6cdbd0543826002/merges.txt",
-      "sha256": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5",
-      "bytes": 456318,
-      "source": "model/merges.txt"
-    },
-    {
-      "path": "app/src/main/assets/local-model/verb-form-vocab.txt",
-      "url": "https://raw.githubusercontent.com/grammarly/gector/3d41d2841512d2690cffce1b5ac6795fe9a0a5dd/data/verb-form-vocab.txt",
-      "sha256": "5906804ec8a1acd8cbfc2918522bf429ce5edded8bbc46ffc2be861d280d3abf",
-      "bytes": 4390076,
-      "source": "model/verb-form-vocab.txt"
-    },
     {
       "path": "app/src/main/assets/local-model/rewrite-qwen2.5-0.5b-q4.gguf",
       "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true",
       "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
       "bytes": 491400032,
       "source": "model/rewrite-qwen2.5-0.5b-q4.gguf"
-    },
-    {
-      "path": "vendor/onnxruntime-android-1.23.2.aar",
-      "url": "https://repo.maven.apache.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.23.2/onnxruntime-android-1.23.2.aar",
-      "sha256": "82048d1f462218adae4ba76477089ab0ba76093d84f733540066db1a8ba6b827",
-      "bytes": 30241654,
-      "source": "tools/onnxruntime-android-1.23.2.aar"
-    },
-    {
-      "path": "vendor/host/onnxruntime.jar",
-      "url": "https://repo.maven.apache.org/maven2/com/microsoft/onnxruntime/onnxruntime/1.23.2/onnxruntime-1.23.2.jar",
-      "sha256": "e0ab4a1af57d2da09097202f2dfd691e390c82e81183314788ccde4cf7c3cc38",
-      "bytes": 75255976,
-      "source": "tools/onnxruntime.jar"
-    },
-    {
-      "path": "vendor/host/json.jar",
-      "url": "https://repo.maven.apache.org/maven2/org/json/json/20250517/json-20250517.jar",
-      "sha256": "3ea61b2a06e31edf1c91134fe9106b0ebb16628be169f3db75bc7a2b06b45796",
-      "bytes": 82710,
-      "source": "tools/json.jar"
-    },
-    {
-      "path": "app/src/main/assets/local-model/english-frequency.txt",
-      "url": "https://raw.githubusercontent.com/wolfgarbe/SymSpell/c239062ae02961df18ab7da1671d01b4388204e0/SymSpell/frequency_dictionary_en_82_765.txt",
-      "sha256": "c604e1121e398ae7c7fbf777f11e0a0f2fa66eda932cb9fba1321466cf3acd7b",
-      "bytes": 1332881
     }
-  ],
-  "spelling_revision": "c239062ae02961df18ab7da1671d01b4388204e0"
+  ]
 }

@@ -47,3 +47,17 @@ Final signed APK: **754,289,664 bytes** (about 719 MiB), version code **8**, ver
 At the owner's subsequent request, the signed 0.2.0 APK was installed successfully on the connected OnePlus CPH2707 using `adb install --no-incremental -r`. ADB reported **Success**. The app was not launched or tested, and no phone settings were changed.
 
 The owner subsequently authorized a bounded real-device Editor check using ADB. [Observed examples and remaining false warning](EDITOR_DEVICE_CHECK_020.md) record corrections, acceptance/Undo, dismissal and the limits of this check. No emulator or settings changes were used.
+
+## Editor continuation (0.2.1, 2026-10-11)
+
+The owner's supplied continuation findings exposed separately actionable halves of word-order moves, misleading juxtaposed correction previews and a missing-space guess outranking a spelling correction. Version 0.2.1 groups moved-word edits, previews each card's resulting text and reconciles competing spelling candidates while retaining alternatives. Focused JVM regression checks passed, the signed APK built with the existing package/permission/model/alignment checks, and the final update installed successfully over ADB.
+
+[Recorded device checks](EDITOR_DEVICE_CHECK_021.md) cover individual word-order acceptance, capitalization previews, manual in-place typo repair with stale-finding clearing, spelling alternatives and the full mixed conversational flow. A remaining optional tense proposal from T5 is documented. The original draft was restored and the keyboard hidden. No emulator, permissions/settings changes or external-app checks were used.
+
+## Legacy cleanup (0.2.2, 2026-10-11)
+
+Removed the retired ONNX tagger, the unused frequency spelling engine, their model/tokenizer/dictionary assets, ONNX Android and desktop runtimes, and the legacy host JSON dependency. The Legacy settings choice is gone; old saved selections resolve to T5, while Off remains Off. Model preparation removes private copies no longer present among bundled model assets. Harper, T5 contextual checking and Qwen rewriting/tone remain. Build and Zed classpaths, dependency pins and bundled notices now include only active components.
+
+Only legacy model/spelling tests were removed. The current correction regression source and runner are retained. Engine-independent text-diff, cursor, sensitive-field, Unicode-boundary and insertion-highlight assertions were moved from the retired harness into the retained suite. `python3 tools/test_correction_diff.py` passed both the shared checks and the existing correction/issue-store regressions. No phone, emulator or model inference was used during this cleanup.
+
+The signed ARM64 APK built successfully with package/permission, signature, model-hash, native-library and alignment checks. Static archive/DEX inspection confirms only T5 and Qwen model assets remain, with no ONNX runtime or retired Kotlin engine classes. Version name **0.2.2**, version code **10**. APK size: **641,714,322 bytes** (611.99 MiB), down **107.36 MiB** from 0.2.1. SHA-256: `b4f25bf6b0c65335ba2e19a5883fd18eba38d0825d4fd8054bddcdbb9a7a0ddd`. This cleanup build has not been installed or exercised on the phone.
