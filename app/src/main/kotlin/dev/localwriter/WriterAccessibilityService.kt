@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
@@ -26,8 +27,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.view.inputmethod.EditorInfo
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.ScrollView
-import android.widget.TextView
 import kotlin.math.abs
 
 /** No keyboard switch is required: Android 13 exposes a separate accessibility input connection. */
@@ -57,7 +58,7 @@ class WriterAccessibilityService : AccessibilityService() {
     private var undo: Undo? = null
     private var dismissedEditor: EditorKey? = null
     private var dismissedNode: NodeKey? = null
-    private var bubble: TextView? = null
+    private var bubble: ImageView? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var sheet: LinearLayout? = null
     private var sheetParams: WindowManager.LayoutParams? = null
@@ -279,6 +280,10 @@ class WriterAccessibilityService : AccessibilityService() {
 
     private fun refreshField() {
         if (!connected) return
+        // A field can remain focused after Back hides the keyboard. Do not leave
+        // a launcher on that screen. An already-open correction sheet keeps its
+        // captured editor across transient IME changes until it is dismissed.
+        if (sheet == null && !typingVisible()) { clearField(); return }
         val read = readSnapshot()
         if (read == null) {
             if (retryTransientRead()) return
@@ -554,13 +559,17 @@ class WriterAccessibilityService : AccessibilityService() {
     ).apply { gravity = Gravity.TOP or Gravity.LEFT; title = "Local Writer" }
 
     private fun showBubble() {
+        if (!typingVisible()) { hideBubble(); return }
         if (bubble != null) { updateBubble(); return }
-        val view = Ui.text(this, "W", 17f, android.graphics.Color.WHITE, true).apply {
-            gravity = Gravity.CENTER; background = Ui.background(Ui.GREEN, Ui.dp(this@WriterAccessibilityService, 28))
-            setPadding(0, 0, 0, 0); contentDescription = "Open local writing assistant"
+        val view = ImageView(this).apply {
+            setImageResource(R.drawable.ic_writer_widget)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            background = Ui.background(Ui.GREEN, Ui.dp(this@WriterAccessibilityService, 12))
+            elevation = Ui.dp(this@WriterAccessibilityService, 4).toFloat()
+            contentDescription = "Open local writing assistant"
             isFocusable = false
         }
-        val p = overlayParams(Ui.dp(this, 58), Ui.dp(this, 48))
+        val p = overlayParams(Ui.dp(this, 48), Ui.dp(this, 48))
         bubble = view; bubbleParams = p
         positionOverlays()
         view.setOnClickListener { openSheet() }
@@ -587,8 +596,28 @@ class WriterAccessibilityService : AccessibilityService() {
     }
 
     private fun updateBubble() {
-        bubble?.text = if (suggestionCount == 0) "W" else "W $suggestionCount"
-        bubble?.contentDescription = "Local writing assistant, $suggestionCount suggestions"
+        bubble?.contentDescription = "Open local writing assistant, $suggestionCount suggestions"
+    }
+
+    private fun typingVisible(): Boolean {
+        if (!connected || !unlocked()) return false
+        if (runCatching {
+            windows.any { window ->
+                if (window.type != AccessibilityWindowInfo.TYPE_INPUT_METHOD) false
+                else Rect().let { bounds -> window.getBoundsInScreen(bounds); !bounds.isEmpty }
+            }
+        }.getOrDefault(false)) return true
+        if (wm.currentWindowMetrics.windowInsets.isVisible(WindowInsets.Type.ime())) return true
+        // A physical keyboard has no on-screen IME window. A live editor still
+        // defines a typing session when the hardware keyboard is available.
+        val config = resources.configuration
+        return editor != null && config.keyboard == Configuration.KEYBOARD_QWERTY &&
+            config.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
+    }
+
+    private fun hideBubble() {
+        bubble?.let { if (connected) runCatching { wm.removeViewImmediate(it) } }
+        bubble = null; bubbleParams = null
     }
 
     private fun openSheet() {
@@ -669,8 +698,7 @@ class WriterAccessibilityService : AccessibilityService() {
         transientReadStarted = 0L; fieldReadPending = false
         invalidateResults(); Engine.main.removeCallbacks(refresh); Engine.main.removeCallbacks(confirmUndo)
         closeSheet()
-        bubble?.let { if (connected) runCatching { wm.removeViewImmediate(it) } }
-        bubble = null; bubbleParams = null; suggestionCount = 0
+        hideBubble(); suggestionCount = 0
         snapshot = null; retainedNode?.recycle(); retainedNode = null; undo = null
     }
     override fun onInterrupt() { editor = null; epoch++; clearField() }

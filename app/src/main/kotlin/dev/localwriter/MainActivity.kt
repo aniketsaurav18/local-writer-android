@@ -152,7 +152,7 @@ class MainActivity : Activity() {
         status.addView(Ui.text(this, "Use it where you write", 19f, bold = true))
         status.addView(Ui.text(this, "${if (accessibilityEnabled()) "✓" else "○"} Writing assistant: ${if (accessibilityEnabled()) "enabled" else "not enabled"}", 15f))
         status.addView(Ui.text(this, "${if (accessibilityEnabled()) "✓" else "○"} Floating assistant: ${if (accessibilityEnabled()) "available" else "enable the writing assistant"}", 15f))
-        status.addView(Ui.text(this, "Turn on “Use Local Writer assistant” in Accessibility settings. Open a text field, then tap the round W bubble to review corrections. The Android accessibility shortcut is a separate system button. Passwords and excluded apps are skipped.", 13f, Ui.MUTED))
+        status.addView(Ui.text(this, "Turn on “Use Local Writer assistant” in Accessibility settings. Leave “Accessibility shortcut” off to keep a single widget. The square LW widget appears while typing; tap it to review corrections. Passwords and excluded apps are skipped.", 13f, Ui.MUTED))
         status.addView(Ui.button(this, "Set up writing assistant", true) { accessibilitySettings() })
         val keyboard = Ui.card(page)
         keyboard.addView(Ui.text(this, "Optional writing keyboard", 19f, bold = true))
@@ -357,7 +357,7 @@ class MainActivity : Activity() {
     private fun accessibilitySettings() {
         AlertDialog.Builder(this)
             .setTitle("Enable the floating writing assistant")
-            .setMessage("In Android settings, turn on “Use Local Writer assistant”. Enabling only “Accessibility shortcut” adds Android’s system button, but does not keep the writing assistant running.\n\nOnce enabled, return to a text field. Tap the round green W bubble to open correction cards.\n\nThe service reads the focused field and applies only the corrections you accept. Passwords and excluded apps are skipped.")
+            .setMessage("In Android settings, turn on “Use Local Writer assistant” and leave “Accessibility shortcut” off. If the shortcut is already enabled, turn off only that option so there is a single floating widget.\n\nThe square green LW widget appears while you type and hides when you leave the field or close the keyboard. Tap it to open correction cards. An open correction sheet stays available while you review it.\n\nThe service reads the focused field and applies only the corrections you accept. Passwords and excluded apps are skipped.")
             .setPositiveButton("Open settings") { _, _ -> openAccessibilitySettings() }
             .setNegativeButton("Cancel", null)
             .show()
