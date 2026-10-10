@@ -45,3 +45,5 @@ At the owner's request, no host tests, grammar/model inference, emulator, phone 
 Final signed APK: **754,289,664 bytes** (about 719 MiB), version code **8**, version name **0.2.0**. Release build completed with the checks above; SHA-256 is recorded in `dist/SHA256SUMS`.
 
 At the owner's subsequent request, the signed 0.2.0 APK was installed successfully on the connected OnePlus CPH2707 using `adb install --no-incremental -r`. ADB reported **Success**. The app was not launched or tested, and no phone settings were changed.
+
+The owner subsequently authorized a bounded real-device Editor check using ADB. [Observed examples and remaining false warning](EDITOR_DEVICE_CHECK_020.md) record corrections, acceptance/Undo, dismissal and the limits of this check. No emulator or settings changes were used.

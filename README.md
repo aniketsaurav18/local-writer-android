@@ -48,6 +48,6 @@ For the optional keyboard, choose **Enable keyboard**, enable **Local Writer key
 python3 tools/verify.py dist/local-writer-arm64.apk
 ```
 
-No model generation, host tests, emulator or phone tests were run for 0.2.0, at the owner's request. The historical `tools/test.py` harness targets the legacy ONNX path; it does not establish Harper/T5 quality or phone behavior. APK checks cover signatures (during build), permissions, service declarations, bundled model hashes, native libraries and 16 KiB alignment. Physical-device results are recorded in [validation](docs/VALIDATION.md). No emulator is used.
+No host or emulator tests were run for 0.2.0. After installation, the owner authorized bounded ADB Editor checks; [observed examples](docs/EDITOR_DEVICE_CHECK_020.md) include a remaining false warning. These are not a model-quality benchmark. The historical `tools/test.py` harness targets the legacy ONNX path; it does not establish Harper/T5 quality or phone behavior. APK checks cover signatures (during build), permissions, service declarations, bundled model hashes, native libraries and 16 KiB alignment. Physical-device results are recorded in [validation](docs/VALIDATION.md). No emulator is used.
 
 Our source is MIT licensed. Bundled dependencies and model weights retain their own licenses, including the grammar model's noncommercial restriction; see [third-party notices](THIRD_PARTY.md).
