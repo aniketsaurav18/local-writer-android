@@ -43,3 +43,5 @@ Source review identified and corrected partial-result flicker, duplicate overlap
 At the owner's request, no host tests, grammar/model inference, emulator, phone navigation or settings changes were performed for this update. The phone is disconnected, so 0.2.0 has not been installed. The owner will evaluate actual correction quality, latency, memory and external-field behavior after installation.
 
 Final signed APK: **754,289,664 bytes** (about 719 MiB), version code **8**, version name **0.2.0**. Release build completed with the checks above; SHA-256 is recorded in `dist/SHA256SUMS`.
+
+At the owner's subsequent request, the signed 0.2.0 APK was installed successfully on the connected OnePlus CPH2707 using `adb install --no-incremental -r`. ADB reported **Success**. The app was not launched or tested, and no phone settings were changed.

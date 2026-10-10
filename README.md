@@ -8,7 +8,7 @@ This is original source code. The supplied APK was used to understand the Androi
 
 Basic checking uses the maintained Harper core through Rust/JNI. Contextual checking uses sentence-scoped Unbabel T5-small, converted to Q8_0 GGUF and run through llama.cpp. The former tagger remains an optional Legacy mode. See [Harper integration](docs/HARPER_INTEGRATION.md), [contextual model](docs/CONTEXT_MODEL.md), and [legacy model](docs/GRAMMAR_MODEL.md). There are no app-specific phrase exceptions. Neural suggestions require your review; they have no calibrated confidence or invented explanation.
 
-The [offline engine research and proposed architecture](docs/OFFLINE_ENGINE_RESEARCH.md) compares Harper, LanguageTool, all requested neural checkpoints, Android runtimes, and the current UI/data flow. Version 0.2.0 implements native Harper checking plus separately scheduled contextual correction, a shared issue store for the external badge and panels, and bounded heavy-model residency. The phone has not received this update, and correction quality, latency, and appearance remain for the owner to evaluate.
+The [offline engine research and proposed architecture](docs/OFFLINE_ENGINE_RESEARCH.md) compares Harper, LanguageTool, all requested neural checkpoints, Android runtimes, and the current UI/data flow. Version 0.2.0 implements native Harper checking plus separately scheduled contextual correction, a shared issue store for the external badge and panels, and bounded heavy-model residency. Version 0.2.0 has been installed on the connected phone using ADB. Correction quality, latency, and appearance remain for the owner to evaluate.
 
 ## Build
 
