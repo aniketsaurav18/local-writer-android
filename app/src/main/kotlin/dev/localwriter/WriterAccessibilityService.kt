@@ -40,7 +40,8 @@ class WriterAccessibilityService : AccessibilityService() {
         val node: NodeKey?, val revision: Long, val connection: Boolean,
         val wholeNodeText: String? = null, val selectionStart: Int = -1, val selectionEnd: Int = -1
     )
-    private data class Undo(val source: Snapshot, val replacement: String, val original: String, var confirmed: Boolean = false)
+    private data class Undo(val source: Snapshot, val replacement: String, val original: String,
+        var confirmed: Boolean = false, val submitted: Long = android.os.SystemClock.uptimeMillis())
     private enum class ReadFailure { TRANSIENT, REJECTED }
     private lateinit var prefs: Prefs
     private lateinit var wm: WindowManager
@@ -48,6 +49,7 @@ class WriterAccessibilityService : AccessibilityService() {
     private lateinit var highlights: TextHighlightOverlay
     private var checkedSnapshot: Snapshot? = null
     private var fieldEdits = emptyList<Edit>()
+    private val issueStore = IssueStore()
     private var accessibilityIme: InputMethod? = null
     private var editor: EditorKey? = null
     private var epoch = 0L
@@ -78,17 +80,22 @@ class WriterAccessibilityService : AccessibilityService() {
     private var dragY = -1
     private val refresh = Runnable { refreshField() }
     private val resume = Runnable { scheduleRefresh() }
-    private val confirmUndo = Runnable {
+    private val confirmUndo: Runnable = Runnable {
         val last = undo
         if (last != null) {
             val read = readSnapshot()
             read?.second?.recycle()
-            if (read == null || !sameField(last.source, read.first) || !contains(read.first, last.source.offset, last.replacement)) undo = null
-            else last.confirmed = true
+            if (read != null && sameField(last.source, read.first) && contains(read.first, last.source.offset, last.replacement)) last.confirmed = true
+            else if (read != null && !sameTarget(last.source, read.first) || android.os.SystemClock.uptimeMillis() - last.submitted >= 1200L) undo = null
+            else Engine.main.postDelayed(confirmUndo, 100)
         }
     }
-    private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        Engine.main.post { clearField(); scheduleRefresh() }
+    private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        Engine.main.post {
+            if (key in setOf("dictionary", "dialect", "styleAdvice", "contextModel")) {
+                issueStore.invalidate(); invalidateResults(); scheduleRefresh(0)
+            } else { clearField(); scheduleRefresh() }
+        }
     }
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -185,7 +192,9 @@ class WriterAccessibilityService : AccessibilityService() {
         revision++
         checkedSnapshot = null; fieldEdits = emptyList()
         if (sheet == null) {
-            suggestionCount = 0; checkState = WritingCheckState.CHECKING; updateBubble()
+            suggestionCount = IssueStore.counted(issueStore.current.issues)
+            checkState = if (suggestionCount > 0) WritingCheckState.PARTIAL else WritingCheckState.CHECKING
+            updateBubble()
         }
         if (connected) { analysis.cancel(); highlights.clear() }
     }
@@ -299,42 +308,55 @@ class WriterAccessibilityService : AccessibilityService() {
         }
         val old = snapshot
         if (old != null && (!sameTarget(old, new) || (retainedNode != null && node != null && retainedNode != node))) {
-            closeSheet(); undo = null
+            closeSheet(); undo = null; issueStore.reset()
         }
         val alteredRevision = old?.revision != revision
         val changed = old == null || !sameTarget(old, new) || old.text != new.text || old.offset != new.offset
         if (changed && old != null) invalidateResults()
+        if (old != null && old.offset != new.offset) issueStore.reset()
+        issueStore.update(new.text)
         snapshot = new.copy(revision = revision)
         retainedNode?.recycle(); retainedNode = node
         undo?.let { last ->
             val expectedWhole = last.source.wholeNodeText?.let { whole ->
                 whole.substring(0, last.source.offset) + last.replacement + whole.substring(last.source.offset + last.original.length)
             }
-            if (!sameField(last.source, new) || !contains(new, last.source.offset, last.replacement) ||
-                (expectedWhole != null && new.wholeNodeText != expectedWhole)) undo = null
+            if (!sameField(last.source, new)) undo = null
+            else if (contains(new, last.source.offset, last.replacement) && (expectedWhole == null || new.wholeNodeText == expectedWhole)) last.confirmed = true
+            else if (last.confirmed || android.os.SystemClock.uptimeMillis() - last.submitted >= 1200L) undo = null
         }
         positionOverlays()
         showBubble()
         redrawHighlights()
         panel?.let { assistant ->
-            analysis.cancel()
-            val previousPanel = panelSnapshot
             panelSnapshot = snapshot
-            if (changed || previousPanel?.text != new.text || previousPanel?.offset != new.offset)
-                assistant.update(new.text, immediate = true)
-            return
+            assistant.acceptAnalysis(new.text, issueStore.current)
         }
         if (!changed && !alteredRevision) return
-        suggestionCount = 0
-        checkState = if (new.text.isBlank()) WritingCheckState.IDLE else WritingCheckState.CHECKING
-        updateBubble()
-        if (new.text.isBlank()) { analysis.cancel(); return }
+        startAnalysis()
+    }
+
+    private fun startAnalysis(delay: Long = 180) {
+        val current = snapshot ?: return
+        val pending = issueStore.current.copy(pending = current.text.isNotBlank(), unavailable = false, message = "")
+        issueStore.publish(pending)
+        fieldEdits = issueStore.current.issues; checkedSnapshot = current
+        suggestionCount = IssueStore.counted(fieldEdits)
+        checkState = if (current.text.isBlank()) WritingCheckState.IDLE else pending.state
+        panelSnapshot = if (panel != null) current else panelSnapshot
+        panel?.acceptAnalysis(current.text, issueStore.current)
+        updateBubble(); redrawHighlights()
+        if (current.text.isBlank()) { analysis.cancel(); return }
         val expected = snapshot!!
-        analysis.check(expected.text) { result ->
-            if (snapshot != expected || !allowed(expected.pkg)) return@check
-            fieldEdits = result.getOrDefault(emptyList()); checkedSnapshot = expected
-            suggestionCount = fieldEdits.size
-            checkState = if (result.isSuccess) WritingCheckState.READY else WritingCheckState.UNAVAILABLE
+        analysis.check(expected.text, delay) { result ->
+            val live = snapshot ?: return@check
+            if (live.revision != expected.revision || !sameTarget(expected, live) || live.text != expected.text ||
+                live.offset != expected.offset || !allowed(expected.pkg)) return@check
+            issueStore.publish(result.getOrElse { CheckUpdate(fieldEdits, unavailable = true, message = "Checking unavailable. Tap to retry.") })
+            fieldEdits = issueStore.current.issues; checkedSnapshot = live
+            suggestionCount = IssueStore.counted(fieldEdits)
+            checkState = issueStore.current.state
+            panel?.acceptAnalysis(expected.text, issueStore.current)
             updateBubble()
             redrawHighlights()
         }
@@ -472,6 +494,7 @@ class WriterAccessibilityService : AccessibilityService() {
 
     private fun apply(source: String, edits: List<Edit>): Boolean {
         if (fieldReadPending) return false
+        if (undo?.confirmed == false) { Ui.toast(this, "Waiting for the app to confirm the previous correction"); return false }
         val expected = panelSnapshot ?: return false
         if (expected.text != source || !allowed(expected.pkg)) return false
         val replacement = runCatching { TextLogic.apply(source, edits) }.getOrNull() ?: return false
@@ -485,10 +508,11 @@ class WriterAccessibilityService : AccessibilityService() {
             expected.wholeNodeText != current.first.wholeNodeText) {
             scheduleRefresh(0); return false
         }
-        val restore = if (expected.selectionStart in expected.offset..(expected.offset + source.length) &&
-            expected.selectionEnd in expected.offset..(expected.offset + source.length)) {
-            (expected.offset + TextLogic.mapPosition(expected.selectionStart - expected.offset, edits)) to
-                (expected.offset + TextLogic.mapPosition(expected.selectionEnd - expected.offset, edits))
+        val fresh = current.first
+        val restore = if (fresh.selectionStart in fresh.offset..(fresh.offset + source.length) &&
+            fresh.selectionEnd in fresh.offset..(fresh.offset + source.length)) {
+            (fresh.offset + TextLogic.mapPosition(fresh.selectionStart - fresh.offset, edits)) to
+                (fresh.offset + TextLogic.mapPosition(fresh.selectionEnd - fresh.offset, edits))
         } else null
         if (!replaceRange(current.first, expected.offset, source, replacement, restore)) return false
         undo = Undo(expected, replacement, source)
@@ -624,11 +648,6 @@ class WriterAccessibilityService : AccessibilityService() {
         // Refresh before opening: a bubble click may race the next text/focus event or its debounce.
         refreshField()
         val current = snapshot ?: return
-        val knownCorrections = checkedSnapshot?.takeIf {
-            checkState == WritingCheckState.READY && it.revision == revision && sameField(it, current) &&
-                it.text == current.text && it.offset == current.offset
-        }?.let { fieldEdits.toList() }
-        analysis.cancel()
         highlights.clear()
         compactSheet = true
         sheetAnchorX = bubbleParams?.x ?: dragX
@@ -686,14 +705,15 @@ class WriterAccessibilityService : AccessibilityService() {
             compactSheet = compact; handleArea.visibility = if (compact) View.GONE else View.VISIBLE
             root.background = if (compact) null else sheetBackground()
             positionOverlays()
-        }, inlineRight = sheetOnRight, inlineDrag = ::bindInlineDrag)
+        }, inlineRight = sheetOnRight, inlineDrag = ::bindInlineDrag,
+            sharedStore = issueStore, requestCheck = { refreshField(); startAnalysis(0) })
         root.addView(assistant, LinearLayout.LayoutParams(-1, 0, 1f))
         panel = assistant; sheet = root
         sheetParams = overlayParams(-1, Ui.dp(this, 360))
         positionOverlays()
         if (runCatching { wm.addView(root, sheetParams) }.isFailure) { closeSheet(); return }
         hideBubble()
-        assistant.update(current.text, true, knownCorrections)
+        assistant.acceptAnalysis(current.text, issueStore.current)
     }
 
     private fun bindInlineDrag(view: View) {
@@ -781,7 +801,7 @@ class WriterAccessibilityService : AccessibilityService() {
         if (connected && wasOpen && current != null) {
             if (cached != null) {
                 checkedSnapshot = current.copy(revision = revision); fieldEdits = cached
-                suggestionCount = cached.size; checkState = WritingCheckState.READY; updateBubble()
+                suggestionCount = IssueStore.counted(cached); checkState = issueStore.current.state; updateBubble()
             } else { invalidateResults(); scheduleRefresh() }
             showBubble()
         }
@@ -790,6 +810,7 @@ class WriterAccessibilityService : AccessibilityService() {
     private fun clearField() {
         transientReadStarted = 0L; fieldReadPending = false
         invalidateResults(); Engine.main.removeCallbacks(refresh); Engine.main.removeCallbacks(confirmUndo)
+        issueStore.reset()
         snapshot = null; retainedNode?.recycle(); retainedNode = null; undo = null
         closeSheet()
         hideBubble(); suggestionCount = 0; checkState = WritingCheckState.IDLE

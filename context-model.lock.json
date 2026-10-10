@@ -1,0 +1,76 @@
+{
+  "model": "Unbabel/gec-t5_small",
+  "revision": "c958d53bfbce19c87342b69fc6bcaba7303d076f",
+  "llama_revision": "aa94f2086147cd4bfbcff818ce998dffce5fcb39",
+  "license": "Apache-2.0 (upstream model card)",
+  "quantization": "Q8_0",
+  "conversion_packages": {
+    "torch": "2.6.0",
+    "numpy": "2.2.6",
+    "transformers": "4.57.6",
+    "sentencepiece": "0.2.1",
+    "protobuf": "4.25.8"
+  },
+  "conversion_options": [
+    "--outtype",
+    "q8_0",
+    "--use-temp-file",
+    "--model-name",
+    "Unbabel GEC T5 Small"
+  ],
+  "sources": [
+    {
+      "file": "config.json",
+      "url": "https://huggingface.co/Unbabel/gec-t5_small/resolve/c958d53bfbce19c87342b69fc6bcaba7303d076f/config.json",
+      "bytes": 1440,
+      "sha256": "e8bfc0458801752c6189f00596f9f1cec18536fdf48b31b147e5fda1c9fa6fe9"
+    },
+    {
+      "file": "pytorch_model.bin",
+      "url": "https://huggingface.co/Unbabel/gec-t5_small/resolve/c958d53bfbce19c87342b69fc6bcaba7303d076f/pytorch_model.bin",
+      "bytes": 242083771,
+      "sha256": "5767cb48bbfa86288b1bcb4db8b15d798ad72bb23e4db695f2e4394882fa7766"
+    },
+    {
+      "file": "spiece.model",
+      "url": "https://huggingface.co/Unbabel/gec-t5_small/resolve/c958d53bfbce19c87342b69fc6bcaba7303d076f/spiece.model",
+      "bytes": 791656,
+      "sha256": "d60acb128cf7b7f2536e8f38a5b18a05535c9e14c7a355904270e15b0945ea86"
+    },
+    {
+      "file": "tokenizer.json",
+      "url": "https://huggingface.co/Unbabel/gec-t5_small/resolve/c958d53bfbce19c87342b69fc6bcaba7303d076f/tokenizer.json",
+      "bytes": 1387604,
+      "sha256": "d74830f08d84b043c6a9bf0c72240b701c87775f5eec5fc766e62d8d0d3b468d"
+    },
+    {
+      "file": "tokenizer_config.json",
+      "url": "https://huggingface.co/Unbabel/gec-t5_small/resolve/c958d53bfbce19c87342b69fc6bcaba7303d076f/tokenizer_config.json",
+      "bytes": 1924,
+      "sha256": "24477ecc3e60b640770e4860c51437de4fd3b3c3b2ca10267ccc4fad3c262c9d"
+    },
+    {
+      "file": "special_tokens_map.json",
+      "url": "https://huggingface.co/Unbabel/gec-t5_small/resolve/c958d53bfbce19c87342b69fc6bcaba7303d076f/special_tokens_map.json",
+      "bytes": 1786,
+      "sha256": "4720c0fddbe4c5991334f85ad7073d9bd0a294a8ba4641a2f8dab614ca825949"
+    },
+    {
+      "file": "README.md",
+      "url": "https://huggingface.co/Unbabel/gec-t5_small/resolve/c958d53bfbce19c87342b69fc6bcaba7303d076f/README.md",
+      "bytes": 1387,
+      "sha256": "c5284e7fb1d5febbbf9a9b2de4addf43ff6091c4248f4bef50fefe3bde1245a3"
+    }
+  ],
+  "derived_tokenizer": {
+    "file": "added_tokens.json",
+    "sha256": "4e00525facddbc1b65c0bb802a0b56c6dbf887c829a1e9b0d8cc31ccba1cc99a",
+    "tokens": 100
+  },
+  "asset": {
+    "path": "app/src/main/assets/local-model/context-t5-small-q8.gguf",
+    "bytes": 82843360,
+    "sha256": "01198fee99c5dd1edd84c2b6f92a98b0e15f4faeb06029dbd40ef0a71d863563"
+  },
+  "validation": "Source/hash and container checks only; no generation, accuracy or latency test."
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "file": "harper-core/src/linting/for_free_of_charge.rs",
+    "before": "TokenKind::is_sentence_terminator,",
+    "after": "TokenKind::is_sentence_terminator as fn(&TokenKind) -> bool,"
+  },
+  {
+    "file": "harper-core/src/linting/for_free_of_charge.rs",
+    "before": "TokenKind::is_conjunction,",
+    "after": "TokenKind::is_conjunction as fn(&TokenKind) -> bool,"
+  },
+  {
+    "file": "harper-core/src/linting/in_demand_in_depth.rs",
+    "before": "TokenKind::is_verb_lemma,",
+    "after": "TokenKind::is_verb_lemma as fn(&TokenKind) -> bool,"
+  },
+  {
+    "file": "harper-core/src/linting/naked_eye.rs",
+    "before": "TokenKind::is_determiner,",
+    "after": "TokenKind::is_determiner as fn(&TokenKind) -> bool,"
+  }
+]

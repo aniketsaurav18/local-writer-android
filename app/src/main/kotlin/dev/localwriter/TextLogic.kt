@@ -2,8 +2,15 @@ package dev.localwriter
 
 import java.util.regex.Pattern
 
-data class Edit(val begin: Int, val end: Int, val replacement: String) {
-    fun key(text: String) = "${text.substring(begin, end)}\u0000$replacement"
+data class Edit(
+    val begin: Int, val end: Int, val replacement: String,
+    val category: String = "Grammar", val explanation: String = "",
+    val alternatives: List<String> = emptyList(), val engine: String = "context",
+    val ruleId: String = "", val actionable: Boolean = true,
+    val priority: Int = 100, val style: Boolean = false
+) {
+    fun key(text: String) = "$begin:$end\u0000${text.substring(begin, end)}\u0000$ruleId\u0000$replacement"
+    val choices: List<String> get() = if (actionable) (listOf(replacement) + alternatives).distinct() else emptyList()
 }
 
 /** All positions are UTF-16, matching Android's editor and accessibility APIs. */
@@ -66,6 +73,7 @@ object TextLogic {
     fun apply(text: String, edits: List<Edit>): String {
         var end = text.length; var result = text
         for (e in edits.sortedByDescending { it.begin }) {
+            require(e.actionable) { "This suggestion has no automatic correction" }
             require(e.begin in 0..e.end && e.end <= end) { "Invalid or overlapping correction" }
             require(e.begin == 0 || e.begin == text.length || !text[e.begin].isLowSurrogate()) { "Split Unicode character" }
             require(e.end == 0 || e.end == text.length || !text[e.end].isLowSurrogate()) { "Split Unicode character" }

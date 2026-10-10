@@ -31,3 +31,15 @@ At the owner's request, a read-only ADB screenshot captured an active X draft an
 Primary upstream inspection then identified general model-input/decoder mismatches: leading-space raw-text BPE instead of bare whitespace tokens, separate punctuation/contraction tokens, an unsupported global 0.7 confidence floor, and suppression of adjacent identical labels. Version 0.1.6 fixes those paths, keeps four iterative rounds, and applies predictions against original token indexes. [Model documentation](GRAMMAR_MODEL.md) records the pinned source references. No model inference, host tests, emulator or runtime tests were run. Detection quality and the previously missed text remain for the owner to verify.
 
 The revised version 0.1.6 APK built successfully with signature, package/permission, bundled-model hash and alignment checks, then installed successfully on the connected OnePlus CPH2707 using `adb install --no-incremental -r`. The rejected rule-based build was never installed. No app launch or phone interaction followed installation.
+
+## Offline architecture update (0.2.0, 2026-10-11)
+
+This update replaces the default continuous-checking path with native Harper 2.12.0 and the contextual path with pinned Unbabel GEC T5-small Q8_0 GGUF. The latter is 82,843,360 bytes; the ARM64 Harper library is 12,505,248 bytes. The former ONNX tagger remains an optional Legacy mode, and Qwen rewriting/tone remain explicit actions. APK storage includes all three neural assets; this is not a lightweight distribution.
+
+Kotlin and both native adapters compiled successfully. Build-only validation checks the APK signature, independent package, absence of network/login/telemetry manifest integrations, service/IME declarations, byte-for-byte model asset hashes, the pinned contextual asset digest, required native libraries and 16 KiB ZIP alignment. Harper's ELF LOAD alignment and exported JNI entry point were inspected statically. Full third-party license notices are bundled.
+
+Source review identified and corrected partial-result flicker, duplicate overlapping engine findings, neural changes to personal dictionary names, selection-only result invalidation, optimistic updates before asynchronous external commits, first-use cancellation races, and heavy-model residency. The correction badge and both external panel modes use a shared store; unchanged-sentence findings/dismissals survive suitable edits, warnings have no Accept action, alternatives are reviewable, and bulk acceptance is restricted to compatible corrections with one replacement. These are implementation descriptions, not observed runtime results.
+
+At the owner's request, no host tests, grammar/model inference, emulator, phone navigation or settings changes were performed for this update. The phone is disconnected, so 0.2.0 has not been installed. The owner will evaluate actual correction quality, latency, memory and external-field behavior after installation.
+
+Final signed APK: **754,289,664 bytes** (about 719 MiB), version code **8**, version name **0.2.0**. Release build completed with the checks above; SHA-256 is recorded in `dist/SHA256SUMS`.

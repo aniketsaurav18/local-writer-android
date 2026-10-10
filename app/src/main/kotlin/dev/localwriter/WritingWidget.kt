@@ -8,7 +8,7 @@ import android.graphics.RectF
 import android.os.SystemClock
 import android.view.View
 
-enum class WritingCheckState { IDLE, CHECKING, READY, UNAVAILABLE }
+enum class WritingCheckState { IDLE, CHECKING, PARTIAL, READY, UNAVAILABLE }
 
 /** A small visible badge inside a larger transparent touch target. */
 class WritingWidget(context: Context) : View(context) {
@@ -25,8 +25,8 @@ class WritingWidget(context: Context) : View(context) {
     fun update(count: Int, state: WritingCheckState) {
         this.count = count.coerceAtLeast(0); this.state = state
         contentDescription = when (state) {
-            WritingCheckState.CHECKING -> "Checking writing, open writing assistant"
-            WritingCheckState.UNAVAILABLE -> "Check unavailable, open writing assistant to retry"
+            WritingCheckState.CHECKING, WritingCheckState.PARTIAL -> "${this.count} suggestions, checking writing, open writing assistant"
+            WritingCheckState.UNAVAILABLE -> "${this.count} suggestions, some checks unavailable, open writing assistant to retry"
             else -> "Open writing assistant, ${this.count} suggestions"
         }
         invalidate()
@@ -40,15 +40,20 @@ class WritingWidget(context: Context) : View(context) {
         canvas.drawCircle(cx, cy, radius, paint)
         paint.color = Color.WHITE
         when {
-            state == WritingCheckState.CHECKING -> {
+            state == WritingCheckState.CHECKING || state == WritingCheckState.PARTIAL -> {
                 paint.style = Paint.Style.STROKE; paint.strokeWidth = 2f * density
                 paint.strokeCap = Paint.Cap.ROUND
-                val r = radius - 5f * density
+                val r = radius - (if (count > 0) 2f else 5f) * density
                 val angle = (SystemClock.uptimeMillis() % 1200) * 360f / 1200f
                 canvas.drawArc(RectF(cx-r, cy-r, cx+r, cy+r), angle, 250f, false, paint)
+                if (count > 0) drawLabel(canvas, if (count > 99) "99+" else count.toString(), cx, cy)
                 if (isAttachedToWindow) postInvalidateDelayed(50)
             }
-            state == WritingCheckState.UNAVAILABLE -> drawLabel(canvas, "!", cx, cy)
+            state == WritingCheckState.UNAVAILABLE -> {
+                drawLabel(canvas, if (count > 0) (if (count > 99) "99+" else count.toString()) else "!", cx, cy)
+                paint.style = Paint.Style.FILL; paint.color = 0xffffb347.toInt()
+                canvas.drawCircle(cx + 11f * density, cy - 11f * density, 3f * density, paint)
+            }
             count > 0 -> drawLabel(canvas, if (count > 99) "99+" else count.toString(), cx, cy)
             else -> {
                 val r = (radius * 0.9f).toInt()

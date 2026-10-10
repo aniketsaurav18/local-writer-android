@@ -1,0 +1,4 @@
+# Preserve upstream license/model-card text and generated notices verbatim.
+app/src/main/assets/notices/* -whitespace
+native/harper/THIRD_PARTY_NOTICES.txt -whitespace
+native/harper/licenses/*.txt -whitespace

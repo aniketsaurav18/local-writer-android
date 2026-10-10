@@ -152,7 +152,7 @@ class MainActivity : Activity() {
         status.addView(Ui.text(this, "Use it where you write", 19f, bold = true))
         status.addView(Ui.text(this, "${if (accessibilityEnabled()) "✓" else "○"} Writing assistant: ${if (accessibilityEnabled()) "enabled" else "not enabled"}", 15f))
         status.addView(Ui.text(this, "${if (accessibilityEnabled()) "✓" else "○"} Floating assistant: ${if (accessibilityEnabled()) "available" else "enable the writing assistant"}", 15f))
-        status.addView(Ui.text(this, "Allow “Use Local Writer assistant” in Accessibility settings. The square LW widget appears while typing; tap it to review corrections. Passwords and excluded apps are skipped.", 13f, Ui.MUTED))
+        status.addView(Ui.text(this, "Allow “Use Local Writer assistant” in Accessibility settings. The small circular widget appears while typing; tap it to review corrections. Passwords and excluded apps are skipped.", 13f, Ui.MUTED))
         status.addView(Ui.button(this, "Set up writing assistant", true) { accessibilitySettings() })
         val keyboard = Ui.card(page)
         keyboard.addView(Ui.text(this, "Optional writing keyboard", 19f, bold = true))
@@ -298,17 +298,26 @@ class MainActivity : Activity() {
         })
         controls.addView(Ui.text(this, if (prefs.pauseUntil > System.currentTimeMillis()) "Paused until ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(prefs.pauseUntil))}" else "Assistant is available", 13f, Ui.MUTED))
         Ui.addRow(controls, Ui.button(this, "Pause 30 minutes") { prefs.pauseUntil = System.currentTimeMillis() + 30 * 60_000; refreshAnalysis(); showTab(2) }, Ui.button(this, "Resume") { prefs.pauseUntil = 0; refreshAnalysis(); showTab(2) })
-        addChoice(controls, "English dialect", listOf("American", "British"), prefs.dialect) { prefs.dialect = it; if (prefs.allowed(packageName)) panel.update(editor.text.toString(), true) }
+        addChoice(controls, "English dialect", listOf("American", "British", "Indian", "Australian", "Canadian"), prefs.dialect) { prefs.dialect = it; if (prefs.allowed(packageName)) panel.update(editor.text.toString(), true) }
+        val checkingModes = mapOf("Contextual" to "T5", "Legacy" to "Tagger", "Off" to "Off")
+        addChoice(controls, "Contextual checking", checkingModes.keys.toList(), checkingModes.entries.firstOrNull { it.value == prefs.contextModel }?.key ?: "Contextual") {
+            prefs.contextModel = checkingModes.getValue(it); if (prefs.allowed(packageName)) panel.update(editor.text.toString(), true)
+        }
+        controls.addView(Ui.text(this, "Contextual checks run after a typing pause. Basic spelling and grammar checks remain available with contextual checking off.", 13f, Ui.MUTED))
+        controls.addView(Switch(this).apply {
+            text = "Include style advice"; isChecked = prefs.styleAdvice
+            setOnCheckedChangeListener { _, checked -> prefs.styleAdvice = checked; if (prefs.allowed(packageName)) panel.update(editor.text.toString(), true) }
+        })
         addChoice(controls, "Writing goal", listOf("General", "Academic", "Business", "Creative", "Casual"), prefs.goal) { prefs.goal = it }
         controls.addView(Switch(this).apply { text = "Keyboard vibration"; isChecked = prefs.vibrate; setOnCheckedChangeListener { _, checked -> prefs.vibrate = checked } })
         val dictionary = Ui.card(page)
         dictionary.addView(Ui.text(this, "Personal dictionary", 19f, bold = true))
-        dictionary.addView(Ui.text(this, "Keep names and words you use from appearing as suggestions.", 13f, Ui.MUTED))
+        dictionary.addView(Ui.text(this, "Keep names and words you use from appearing as spelling suggestions.", 13f, Ui.MUTED))
         val input = EditText(this).apply { hint = "Add a word"; isSingleLine = true; isSaveEnabled = false }
         dictionary.addView(input)
         dictionary.addView(Ui.button(this, "Add word") {
             val value = input.text.toString().trim()
-            if (!value.matches(Regex("[\\p{L}’'-]+"))) { Ui.toast(this, "Enter one word using letters"); return@button }
+            if (!value.matches(Regex("[\\p{L}\\p{M}’'-]+"))) { Ui.toast(this, "Enter one word using letters"); return@button }
             prefs.dictionary(value, true); showTab(2)
         })
         if (prefs.dictionary.isEmpty()) dictionary.addView(Ui.text(this, "No saved words yet", 13f, Ui.MUTED))
@@ -357,7 +366,7 @@ class MainActivity : Activity() {
     private fun accessibilitySettings() {
         AlertDialog.Builder(this)
             .setTitle("Enable the floating writing assistant")
-            .setMessage("Turn on “Use Local Writer assistant” in Android settings and allow access.\n\nThe square green LW widget appears while you type and hides when you leave the field or close the keyboard. Tap it to open correction cards. An open correction sheet stays available while you review it.\n\nThe service reads the focused field and applies only the corrections you accept. Passwords and excluded apps are skipped.")
+            .setMessage("Turn on “Use Local Writer assistant” in Android settings and allow access.\n\nThe small circular widget appears while you type and hides when you leave the field or close the keyboard. Tap it to open correction cards. An open correction sheet stays available while you review it.\n\nThe service reads the focused field and applies only the corrections you accept. Passwords and excluded apps are skipped.")
             .setPositiveButton("Open settings") { _, _ -> openAccessibilitySettings() }
             .setNegativeButton("Cancel", null)
             .show()

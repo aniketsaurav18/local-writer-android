@@ -4,7 +4,9 @@ The root MIT license covers this project's original Kotlin, JNI and build-tool c
 
 | Component | Source/version | License |
 | --- | --- | --- |
-| Grammar model, labels and tokenizer | [kotoshu/grammar-en](https://huggingface.co/kotoshu/grammar-en), revision `7a64ebe0e1944f9de3c5060cb6cdbd0543826002` | CC-BY-NC-SA-4.0, as declared by its model card; noncommercial use |
+| Optional legacy grammar model, labels and tokenizer | [kotoshu/grammar-en](https://huggingface.co/kotoshu/grammar-en), revision `7a64ebe0e1944f9de3c5060cb6cdbd0543826002` | CC-BY-NC-SA-4.0, as declared by its model card; noncommercial use |
+| Continuous checking core, dictionaries and embedded POS/chunker | [Automattic Harper](https://github.com/Automattic/harper), v2.12.0 / `b0ab21f5500da525c76553c56ca1b6b7669c6a78` | Apache-2.0; source license in notices/HARPER-LICENSE.txt, transitive notices in notices/HARPER-DEPENDENCIES.txt; four explicit function-pointer casts applied to generated build source for Rust compatibility |
+| Contextual grammar model and tokenizer | [Unbabel/gec-t5_small](https://huggingface.co/Unbabel/gec-t5_small), `c958d53bfbce19c87342b69fc6bcaba7303d076f`, derived Q8_0 GGUF | Apache-2.0 per pinned model card; notices/UNBABEL-LICENSE.txt and UNBABEL-MODEL-CARD.md; derivation and hashes in context-model.lock.json |
 | Rewrite/tone model | [Qwen2.5-0.5B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF), revision `9217f5db79a29953eb74d5343926648285ec7e67`, Q4_K_M | Apache-2.0 |
 | Verb-form table | [Grammarly GECToR](https://github.com/grammarly/gector), pinned revision in dependencies.lock.json | Apache-2.0 |
 | ONNX Runtime Android/Java | [Microsoft ONNX Runtime](https://github.com/microsoft/onnxruntime), 1.23.2 | MIT |

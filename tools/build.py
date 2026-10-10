@@ -28,11 +28,18 @@ if not kotlinc.exists():
     kotlinc.chmod(0o755)
 if not (ROOT/'vendor/llama.cpp/CMakeLists.txt').exists():
     raise SystemExit('Prepare dependencies with python3 tools/bootstrap.py first.')
+context_lock = json.loads((ROOT/'context-model.lock.json').read_text())['asset']
+context_asset = ROOT/context_lock['path']
+if not context_asset.exists():
+    raise SystemExit('Prepare the contextual model with python3 tools/prepare_context_model.py first.')
+if context_asset.stat().st_size != context_lock['bytes'] or digest(context_asset) != context_lock['sha256']:
+    raise SystemExit('Contextual model does not match context-model.lock.json.')
+run(sys.executable,'tools/build_harper.py')
 run('cmake','-S','native','-B','build/native','-DCMAKE_TOOLCHAIN_FILE='+str(NDK/'build/cmake/android.toolchain.cmake'),'-DANDROID_ABI=arm64-v8a','-DANDROID_PLATFORM=android-33','-DANDROID_STL=c++_static','-DCMAKE_BUILD_TYPE=Release','-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON','-DGGML_CPU_ARM_ARCH=armv8-a')
 run('cmake','--build','build/native','--target','localrewrite','-j','2')
 run(BT/'aapt2','compile','--dir','app/src/main/res','-o',BUILD/'resources.zip')
 generated=BUILD/'generated';generated.mkdir(exist_ok=True)
-run(BT/'aapt2','link','-I',ANDROID,'--manifest','app/src/main/AndroidManifest.xml','--java',generated,'--min-sdk-version','33','--target-sdk-version','36','--version-code','7','--version-name','0.1.6','-o',BUILD/'resources.apk',BUILD/'resources.zip')
+run(BT/'aapt2','link','-I',ANDROID,'--manifest','app/src/main/AndroidManifest.xml','--java',generated,'--min-sdk-version','33','--target-sdk-version','36','--version-code','8','--version-name','0.2.0','-o',BUILD/'resources.apk',BUILD/'resources.zip')
 classes=BUILD/'classes'
 if classes.exists():shutil.rmtree(classes)
 classes.mkdir()
@@ -56,6 +63,7 @@ with zipfile.ZipFile(unsigned,'w',allowZip64=False) as z:
         for name in ['libonnxruntime.so','libonnxruntime4j_jni.so']:
             z.writestr('lib/arm64-v8a/'+name,aar.read('jni/arm64-v8a/'+name),compress_type=zipfile.ZIP_STORED)
     z.write(BUILD/'native/liblocalrewrite.so','lib/arm64-v8a/liblocalrewrite.so',compress_type=zipfile.ZIP_STORED)
+    z.write(BUILD/'harper/android/liblocalharper.so','lib/arm64-v8a/liblocalharper.so',compress_type=zipfile.ZIP_STORED)
 run(BT/'zipalign','-f','-P','16','4',unsigned,BUILD/'local-writer-aligned.apk')
 key=BUILD/'signing/local-writer.p12';key.parent.mkdir(exist_ok=True)
 if not key.exists():
