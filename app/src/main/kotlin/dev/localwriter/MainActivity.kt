@@ -42,6 +42,7 @@ class MainActivity : Activity() {
             paint.isUnderlineText = true
             paint.underlineColor = Color.rgb(207, 60, 60)
             paint.underlineThickness = 2f
+            paint.bgColor = Color.rgb(255, 232, 232)
         }
     }
 
@@ -151,7 +152,7 @@ class MainActivity : Activity() {
         status.addView(Ui.text(this, "Use it where you write", 19f, bold = true))
         status.addView(Ui.text(this, "${if (accessibilityEnabled()) "✓" else "○"} Writing assistant: ${if (accessibilityEnabled()) "enabled" else "not enabled"}", 15f))
         status.addView(Ui.text(this, "${if (accessibilityEnabled()) "✓" else "○"} Floating assistant: ${if (accessibilityEnabled()) "available" else "enable the writing assistant"}", 15f))
-        status.addView(Ui.text(this, "Accessibility reads the focused text field so you can review suggestions. Passwords and excluded apps are skipped. Enable permissions only if you want this feature.", 13f, Ui.MUTED))
+        status.addView(Ui.text(this, "Turn on “Use Local Writer assistant” in Accessibility settings. Open a text field, then tap the round W bubble to review corrections. The Android accessibility shortcut is a separate system button. Passwords and excluded apps are skipped.", 13f, Ui.MUTED))
         status.addView(Ui.button(this, "Set up writing assistant", true) { accessibilitySettings() })
         val keyboard = Ui.card(page)
         keyboard.addView(Ui.text(this, "Optional writing keyboard", 19f, bold = true))
@@ -241,8 +242,8 @@ class MainActivity : Activity() {
         value.getSpans(0, value.length, CorrectionUnderline::class.java).forEach(value::removeSpan)
         edits.forEach { e ->
             if (e.begin in 0..e.end && e.end <= value.length) {
-                val start = if (e.begin == e.end) maxOf(0, e.begin - 1) else e.begin
-                val end = if (e.begin == e.end) minOf(value.length, e.begin + 1) else e.end
+                val range = TextLogic.highlightRange(value.toString(), e) ?: return@forEach
+                val (start, end) = range
                 if (start < end) value.setSpan(CorrectionUnderline(), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
@@ -354,8 +355,17 @@ class MainActivity : Activity() {
         .any { it.resolveInfo.serviceInfo.packageName == packageName && it.resolveInfo.serviceInfo.name.endsWith("WriterAccessibilityService") }
 
     private fun accessibilitySettings() {
+        AlertDialog.Builder(this)
+            .setTitle("Enable the floating writing assistant")
+            .setMessage("In Android settings, turn on “Use Local Writer assistant”. Enabling only “Accessibility shortcut” adds Android’s system button, but does not keep the writing assistant running.\n\nOnce enabled, return to a text field. Tap the round green W bubble to open correction cards.\n\nThe service reads the focused field and applies only the corrections you accept. Passwords and excluded apps are skipped.")
+            .setPositiveButton("Open settings") { _, _ -> openAccessibilitySettings() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun openAccessibilitySettings() {
         val details = Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
-            .putExtra(Intent.EXTRA_COMPONENT_NAME, ComponentName(this, WriterAccessibilityService::class.java).flattenToString())
+            .putExtra(Intent.EXTRA_COMPONENT_NAME, ComponentName(this, WriterAccessibilityService::class.java))
         if (!launch(details)) launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
 

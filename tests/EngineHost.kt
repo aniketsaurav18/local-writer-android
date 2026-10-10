@@ -35,5 +35,12 @@ fun main(args: Array<String>) {
     for (type in listOf(1,0x21,0x101)) check(!TextLogic.sensitive(type))
     check(runCatching { TextLogic.apply("😀 hi",listOf(Edit(1,2,"x"))) }.isFailure)
     check(runCatching { TextLogic.apply("abcdef",listOf(Edit(0,3,"x"),Edit(2,5,"y"))) }.isFailure)
+    val phrase = "This is a testss. What happening?"
+    val spelling = SpellingEngine(File(args[0],"english-frequency.txt"))
+    check(TextLogic.apply(phrase,spelling.check(phrase,emptySet()) { true }) == "This is a test. What happening?")
+    check(spelling.check(phrase,setOf("testss")) { true }.isEmpty())
+    check(spelling.check("Hello, world. This is a correct sentence.",emptySet()) { true }.isEmpty())
+    val insertion = phrase.indexOf("happening")
+    check(TextLogic.highlightRange(phrase,Edit(insertion,insertion,"is ")) == (insertion to (insertion+"happening".length)))
     println("PASS: correct-text preservation, long documents, cancellation, UTF-16 boundaries, cursor mapping and password filters")
 }

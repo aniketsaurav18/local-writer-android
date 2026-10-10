@@ -11,5 +11,6 @@ The root MIT license covers this project's original Kotlin, JNI and build-tool c
 | Native rewrite runtime | [llama.cpp](https://github.com/ggml-org/llama.cpp), `aa94f2086147cd4bfbcff818ce998dffce5fcb39` | MIT; copy in vendor/LLAMA-LICENSE |
 | Kotlin runtime/compiler | [JetBrains Kotlin](https://github.com/JetBrains/kotlin), 2.2.20 | Apache-2.0 |
 | Host test JSON library | [JSON-java](https://github.com/stleary/JSON-java), 20250517 | Public domain |
+| English spelling frequency dictionary | [SymSpell](https://github.com/wolfgarbe/SymSpell), revision `c239062ae02961df18ab7da1671d01b4388204e0` | MIT; attribution bundled in notices/SPELLING-LICENSE.txt |
 
 See upstream notices in the downloaded runtime/compiler/source distributions for transitive components. Grammarly's supplied Android APK remains proprietary and is not a dependency of this app. This project is not affiliated with Grammarly.

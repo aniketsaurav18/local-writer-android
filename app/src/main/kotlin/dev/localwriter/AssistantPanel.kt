@@ -3,6 +3,16 @@ package dev.localwriter
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Color
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.TextPaint
+import android.text.method.LinkMovementMethod
+import android.text.style.ClickableSpan
+import android.text.style.ForegroundColorSpan
+import android.text.style.StrikethroughSpan
+import android.view.View
+import android.widget.ScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 
@@ -21,6 +31,8 @@ class AssistantPanel(
     private var edits = emptyList<Edit>()
     private val ignored = mutableSetOf<String>()
     private var preview: String? = null
+    private var selected: Edit? = null
+    private val cards = mutableMapOf<Edit, View>()
     init {
         orientation = VERTICAL; setPadding(Ui.dp(context,12),Ui.dp(context,12),Ui.dp(context,12),Ui.dp(context,12)); background = Ui.background()
         val top = Ui.row(context)
@@ -32,27 +44,85 @@ class AssistantPanel(
     }
     fun update(text: String, immediate: Boolean = false) {
         if (source == text && !immediate) return
-        source = text; preview = null; ignored.clear(); edits = emptyList(); highlight(emptyList()); count(0)
+        source = text; preview = null; selected = null; ignored.clear(); edits = emptyList(); highlight(emptyList()); count(0)
         if (source.isBlank()) { session.cancel(); status.text = "Start writing to see suggestions"; body.removeAllViews(); return }
         status.text = "Checking on this device…"; body.removeAllViews()
         session.check(source,if(immediate)0 else 550) { result ->
-            result.onSuccess { edits = it; renderCorrections() }.onFailure { status.text = "Unable to check this text. Tap Corrections to retry." }
+            result.onSuccess { edits = it; selected = it.firstOrNull(); renderCorrections() }.onFailure { status.text = "Unable to check this text. Tap Corrections to retry." }
         }
     }
     private fun checkNow() = update(source,true)
     private fun renderCorrections() {
-        body.removeAllViews(); val shown = edits.filter { it.key(source) !in ignored }
+        body.removeAllViews(); cards.clear(); val shown = edits.filter { it.key(source) !in ignored }
+        if (selected != null && selected !in shown) selected = shown.firstOrNull()
         count(shown.size); highlight(shown)
         status.text = if(shown.isEmpty()) "No suggestions · checked locally" else "${shown.size} suggestion${if(shown.size==1)"" else "s"} · checked locally"
-        if(shown.isNotEmpty()) body.addView(Ui.button(context,"Accept all",true) { replace(shown) })
+        if (shown.isNotEmpty()) {
+            val draft = Ui.card(body)
+            draft.setBackgroundColor(Ui.PALE)
+            draft.addView(Ui.text(context,"Your text · tap a marked word",12f,Ui.MUTED))
+            draft.addView(Ui.text(context,"",16f).apply {
+                text = markedText(source, shown) { edit -> selectCard(edit) }
+                movementMethod = LinkMovementMethod.getInstance()
+                maxLines = 6
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            body.addView(Ui.button(context,"Accept all",true) { replace(shown) })
+        }
         for (e in shown) {
             val card = Ui.card(body); val before = source.substring(e.begin,e.end)
-            card.addView(Ui.text(context,"${before.ifEmpty { "Insert" }} → ${e.replacement.ifEmpty { "Remove" }}",16f,bold=true))
-            card.addView(Ui.text(context,"Suggested grammar or spelling correction",12f,Ui.MUTED))
-            Ui.addRow(card,Ui.button(context,"Accept",true) { replace(listOf(e)) },Ui.button(context,"Dismiss") { ignored += e.key(source); renderCorrections() })
-            if (before.trim().matches(Regex("[\\p{L}’'-]+"))) card.addView(Ui.button(context,"Add “${before.trim()}” to dictionary") {
-                Prefs(context).dictionary(before,true); ignored += e.key(source); renderCorrections()
-            })
+            cards[e] = card
+            val title = "${before.trim().ifEmpty { "Insert" }} → ${e.replacement.trim().ifEmpty { "Remove" }}"
+            card.addView(Ui.button(context,title) { selected = if (selected == e) null else e; renderCorrections() })
+            if (selected == e) {
+                card.background = Ui.background(Color.rgb(247, 251, 249))
+                val range = TextLogic.highlightRange(source,e)
+                var start = (minOf(range?.first ?: e.begin,e.begin) - 45).coerceAtLeast(0)
+                var end = (maxOf(range?.second ?: e.end,e.end) + 45).coerceAtMost(source.length)
+                if (start > 0 && source[start].isLowSurrogate()) start--
+                if (end < source.length && source[end].isLowSurrogate()) end++
+                val contextText = source.substring(start,end)
+                val relative = Edit(e.begin-start,e.end-start,e.replacement)
+                card.addView(Ui.text(context,"",16f).apply { text = markedText(contextText,listOf(relative)) { selectCard(e) }; movementMethod = LinkMovementMethod.getInstance() })
+                val difference = SpannableString("${before.ifBlank { "Insert" }}  →  ${e.replacement.ifEmpty { "Remove" }}")
+                val oldLength = before.ifBlank { "Insert" }.length
+                difference.setSpan(ForegroundColorSpan(Color.rgb(196,48,61)),0,oldLength,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                if (before.isNotBlank()) difference.setSpan(StrikethroughSpan(),0,oldLength,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                difference.setSpan(ForegroundColorSpan(Ui.GREEN),oldLength+5,difference.length,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                card.addView(Ui.text(context,"",17f,bold=true).apply { text = difference })
+                card.addView(Ui.text(context,"Suggested grammar or spelling correction",12f,Ui.MUTED))
+                Ui.addRow(card,Ui.button(context,"Dismiss") { ignored += e.key(source); renderCorrections() },Ui.button(context,"Accept",true) { replace(listOf(e)) })
+                if (before.trim().matches(Regex("[\\p{L}’'-]+"))) card.addView(Ui.button(context,"Add “${before.trim()}” to dictionary") {
+                    Prefs(context).dictionary(before,true); ignored += e.key(source); renderCorrections()
+                })
+            }
+        }
+    }
+    private fun markedText(text: String, corrections: List<Edit>, click: (Edit) -> Unit): SpannableString {
+        val marked = SpannableString(text)
+        for (edit in corrections) {
+            val (start,end) = TextLogic.highlightRange(text,edit) ?: continue
+            marked.setSpan(object : ClickableSpan() {
+                override fun onClick(widget: View) { click(edit) }
+                override fun updateDrawState(paint: TextPaint) {
+                    paint.isUnderlineText = true; paint.underlineColor = Color.rgb(218,53,65)
+                    paint.underlineThickness = Ui.dp(context,2).toFloat()
+                    paint.bgColor = Color.rgb(255,232,232)
+                }
+            },start,end,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        return marked
+    }
+    private fun selectCard(edit: Edit) {
+        selected = edit; renderCorrections()
+        post {
+            val target = cards[edit] ?: return@post
+            var scrollParent = parent
+            while (scrollParent != null && scrollParent !is ScrollView) scrollParent = scrollParent.parent
+            val scroll = scrollParent as? ScrollView ?: return@post
+            val rect = android.graphics.Rect(0,0,target.width,target.height)
+            scroll.offsetDescendantRectToMyCoords(target,rect)
+            scroll.smoothScrollTo(0,(rect.top-Ui.dp(context,8)).coerceAtLeast(0))
         }
     }
     private fun replace(changes: List<Edit>) {
@@ -98,5 +168,5 @@ class AssistantPanel(
             Ui.addRow(body,Ui.button(context,"Make professional") { rewrite("Professional") },Ui.button(context,"Make friendly") { rewrite("Friendly") })
         }.onFailure { status.text = "Tone unavailable. Try again with a shorter selection." } }
     }
-    fun dispose() { session.cancel(); source = ""; edits = emptyList(); preview = null; ignored.clear() }
+    fun dispose() { session.cancel(); source = ""; edits = emptyList(); preview = null; selected = null; cards.clear(); ignored.clear() }
 }

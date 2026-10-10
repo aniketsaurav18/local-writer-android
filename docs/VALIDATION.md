@@ -7,3 +7,9 @@ Before the owner requested testing stop, host checks passed with the real ONNX g
 That initial editor check exposed Android's rejection of Java's `UNICODE_CHARACTER_CLASS` regex flag. The implementation now uses explicit Unicode word classes and removes the unsupported flag from the BPE regex. Host checks after that source fix passed before the stop request. The corrected final build has **not** been exercised on the phone. Runtime testing stopped at the owner's request; no Android emulator was used.
 
 The owner will verify corrections, local rewrites/tone, keyboard behavior, accessibility permission setup and cross-app overlays. Accessibility has not been enabled automatically, and the selected system keyboard has not been changed. Universal support for secure fields or editors that refuse Android accessibility/IME access is not claimed.
+
+## Overlay follow-up
+
+At the owner's request, a read-only ADB screenshot showed the X draft with no red marks and only Android's square accessibility shortcut. Read-only service state confirmed the writing service was disabled. The owner subsequently enabled it. After the updated APK was built and installed, another requested ADB screenshot showed red underlines on the draft and the round W 3 correction bubble, alongside the optional square Android shortcut. The screenshot is a visual observation, not evidence that accepting corrections or keeping the sheet open worked.
+
+The owner reported that tapping W 3 briefly opened the sheet and then closed it. Source review identified the sheet's own window-state event being treated as a switch away from the editor. The lifecycle fix is included in version 0.1.1. The owner requested no further agent-driven runtime testing; the updated sheet behavior remains for the owner to verify. New pure-code regression assertions for spelling and visible insertion ranges were added but not executed during this follow-up.

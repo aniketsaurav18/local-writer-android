@@ -32,7 +32,7 @@ run('cmake','-S','native','-B','build/native','-DCMAKE_TOOLCHAIN_FILE='+str(NDK/
 run('cmake','--build','build/native','--target','localrewrite','-j','2')
 run(BT/'aapt2','compile','--dir','app/src/main/res','-o',BUILD/'resources.zip')
 generated=BUILD/'generated';generated.mkdir(exist_ok=True)
-run(BT/'aapt2','link','-I',ANDROID,'--manifest','app/src/main/AndroidManifest.xml','--java',generated,'--min-sdk-version','33','--target-sdk-version','36','--version-code','1','--version-name','0.1.0','-o',BUILD/'resources.apk',BUILD/'resources.zip')
+run(BT/'aapt2','link','-I',ANDROID,'--manifest','app/src/main/AndroidManifest.xml','--java',generated,'--min-sdk-version','33','--target-sdk-version','36','--version-code','2','--version-name','0.1.1','-o',BUILD/'resources.apk',BUILD/'resources.zip')
 classes=BUILD/'classes'
 if classes.exists():shutil.rmtree(classes)
 classes.mkdir()

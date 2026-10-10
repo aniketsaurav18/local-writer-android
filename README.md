@@ -2,7 +2,7 @@
 
 An independently implemented Kotlin Android writing assistant with bundled offline grammar and rewrite models. No account, telemetry SDK, runtime downloads, or internet permission. Package: `dev.localwriter`. Android 13+ on ARM64.
 
-The app provides an editor with correction underlines and suggestion cards, a draggable assistant over other apps, an optional writing keyboard, accept/dismiss/accept-all, Undo, personal dictionary, app exclusions, pause/resume, writing goals, American/British spelling preferences, selected-text rewrites, tone analysis, share-in and Android's selected-text processing action. Rewrites include concise, professional, friendly, expand, improve and translation into English.
+The app provides an editor with correction underlines and suggestion cards, a draggable assistant over other apps, an optional writing keyboard, accept/dismiss/accept-all, Undo, personal dictionary, app exclusions, pause/resume, writing goals, American/British spelling preferences, selected-text rewrites, tone analysis, share-in and Android's selected-text processing action. Rewrites include concise, professional, friendly, expand, improve and translation into English. A small bundled English frequency dictionary adds conservative spelling suggestions independently of the grammar model.
 
 This is original source code. The supplied APK was used to understand the Android accessibility approach; its proprietary classes and assets are not included. Cloud-only quality and behavior cannot be reproduced one-to-one by these smaller local models. Custom editors that omit usable Android accessibility and input-connection interfaces cannot be edited reliably. Passwords are deliberately excluded. See [accessibility implementation and limits](docs/ACCESSIBILITY.md).
 
@@ -28,7 +28,9 @@ adb install --no-incremental -r dist/local-writer-arm64.apk
 adb shell am start -n dev.localwriter/.MainActivity
 ```
 
-Open **Local Writer → Set up writing assistant** and enable **Local Writer assistant** in Android accessibility settings. A sideloaded app may require **Allow restricted settings** in its app-info menu first. The app explains the focused-text access before setup. Android's accessibility overlay does not require a separate “Display over other apps” grant. Your current keyboard can remain selected.
+Open **Local Writer → Set up writing assistant** and turn on **Use Local Writer assistant** in Android accessibility settings. Enabling only **Accessibility shortcut** creates Android's square system button; it does not keep the assistant enabled. The app's own round **W** bubble opens a scrolling correction sheet with marked text and expandable correction cards. The enabled service can also handle Android shortcut clicks. A sideloaded app may require **Allow restricted settings** in its app-info menu first. Android's accessibility overlay does not require a separate “Display over other apps” grant. Your current keyboard can remain selected.
+
+External text receives red underlines only when its host app exposes exact character rectangles through Android accessibility. Otherwise the correction sheet still shows underlined words in a marked preview; its ranges are clickable to select the corresponding card. The assistant never guesses external font/layout coordinates or rewrites a field simply to inject visual spans.
 
 For the optional keyboard, choose **Enable keyboard**, enable **Local Writer keyboard** in system settings, then **Choose keyboard**. Password fields get typing keys without grammar/rewrite controls. Fields lacking reliable text offsets decline correction commits; share text to the editor instead.
 

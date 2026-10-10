@@ -65,6 +65,13 @@
       "sha256": "3ea61b2a06e31edf1c91134fe9106b0ebb16628be169f3db75bc7a2b06b45796",
       "bytes": 82710,
       "source": "tools/json.jar"
+    },
+    {
+      "path": "app/src/main/assets/local-model/english-frequency.txt",
+      "url": "https://raw.githubusercontent.com/wolfgarbe/SymSpell/c239062ae02961df18ab7da1671d01b4388204e0/SymSpell/frequency_dictionary_en_82_765.txt",
+      "sha256": "c604e1121e398ae7c7fbf777f11e0a0f2fa66eda932cb9fba1321466cf3acd7b",
+      "bytes": 1332881
     }
-  ]
+  ],
+  "spelling_revision": "c239062ae02961df18ab7da1671d01b4388204e0"
 }

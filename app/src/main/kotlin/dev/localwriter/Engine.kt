@@ -42,7 +42,7 @@ class Prefs(context: Context) {
 object ModelAssets {
     @Synchronized fun prepare(context: Context, rewrite: Boolean = false): File {
         val dir = File(context.filesDir, "models").apply { mkdirs() }
-        val names = if (rewrite) listOf("rewrite-qwen2.5-0.5b-q4.gguf") else listOf("gec-tagger.int8.onnx", "labels.json", "vocab.json", "merges.txt", "verb-form-vocab.txt")
+        val names = if (rewrite) listOf("rewrite-qwen2.5-0.5b-q4.gguf") else listOf("gec-tagger.int8.onnx", "labels.json", "vocab.json", "merges.txt", "verb-form-vocab.txt", "english-frequency.txt")
         for (name in names) {
             val dest = File(dir, name)
             val size = context.assets.openFd("local-model/$name").use { it.length }
@@ -83,11 +83,23 @@ object Engine {
     val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "local-writing-model").apply { isDaemon = true } }
     val main = Handler(Looper.getMainLooper())
     private var grammar: GrammarEngine? = null
+    private var spelling: SpellingEngine? = null
     @Volatile var running: AnalysisSession? = null
     fun check(context: Context, text: String, active: () -> Boolean): List<Edit> {
-        if (grammar == null) grammar = GrammarEngine(ModelAssets.prepare(context))
+        if (grammar == null || spelling == null) {
+            val models = ModelAssets.prepare(context)
+            if (grammar == null) grammar = GrammarEngine(models)
+            if (spelling == null) spelling = SpellingEngine(File(models, "english-frequency.txt"))
+        }
         val prefs = Prefs(context)
-        val initial = grammar!!.check(text, active)
+        val grammarEdits = grammar!!.check(text, active)
+        val spellingEdits = spelling!!.check(text, prefs.dictionary, active).filter { candidate ->
+            grammarEdits.none { existing ->
+                candidate.begin < existing.end && existing.begin < candidate.end ||
+                    existing.begin == existing.end && existing.begin in candidate.begin..candidate.end
+            }
+        }
+        val initial = (grammarEdits + spellingEdits).sortedBy { it.begin }
         val filtered = initial.filter { text.substring(it.begin, it.end).trim().lowercase(Locale.ROOT) !in prefs.dictionary }
         if (prefs.dialect != "British") return filtered
         val corrected = TextLogic.apply(text, filtered)

@@ -27,6 +27,16 @@ object TextLogic {
         }
         return out
     }
+    /** Insertions must mark a visible word instead of an empty space at the insertion point. */
+    fun highlightRange(text: String, edit: Edit): Pair<Int, Int>? {
+        if (edit.begin !in 0..edit.end || edit.end > text.length) return null
+        if (edit.begin < edit.end && text.substring(edit.begin, edit.end).any { !it.isWhitespace() })
+            return edit.begin to edit.end
+        val tokens = words(text)
+        val word = tokens.firstOrNull { it.end > edit.begin && it.text.any(Char::isLetterOrDigit) }
+            ?: tokens.lastOrNull { it.text.any(Char::isLetterOrDigit) }
+        return word?.let { it.start to it.end }
+    }
     fun diff(old: String, corrected: String, offset: Int = 0): List<Edit> {
         val a = words(old); val b = words(corrected)
         val lcs = Array(a.size + 1) { IntArray(b.size + 1) }
