@@ -28,7 +28,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.view.inputmethod.EditorInfo
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import kotlin.math.abs
 
 /** No keyboard switch is required: Android 13 exposes a separate accessibility input connection. */
@@ -62,6 +61,10 @@ class WriterAccessibilityService : AccessibilityService() {
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var sheet: LinearLayout? = null
     private var sheetParams: WindowManager.LayoutParams? = null
+    private var compactSheet = false
+    private var sheetAnchorX = -1
+    private var sheetAnchorY = -1
+    private var sheetOnRight = true
     private var panel: AssistantPanel? = null
     private var panelSnapshot: Snapshot? = null
     private var suggestionCount = 0
@@ -627,14 +630,20 @@ class WriterAccessibilityService : AccessibilityService() {
         }?.let { fieldEdits.toList() }
         analysis.cancel()
         highlights.clear()
+        compactSheet = true
+        sheetAnchorX = bubbleParams?.x ?: dragX
+        sheetAnchorY = bubbleParams?.y ?: dragY
+        sheetOnRight = sheetAnchorX < 0 || sheetAnchorX > wm.currentWindowMetrics.bounds.width() / 2
+        val radius = Ui.dp(this,28).toFloat()
+        fun sheetBackground() = GradientDrawable().apply {
+            setColor(Color.WHITE); cornerRadii = floatArrayOf(radius,radius,radius,radius,0f,0f,0f,0f)
+        }
         val root = Ui.column(this, 0).apply {
-            val radius = Ui.dp(this@WriterAccessibilityService,28).toFloat()
-            background = GradientDrawable().apply {
-                setColor(Color.WHITE); cornerRadii = floatArrayOf(radius,radius,radius,radius,0f,0f,0f,0f)
-            }
+            background = null
             isFocusable = false
         }
         val handleArea = android.widget.FrameLayout(this).apply {
+            visibility = View.GONE
             addView(View(this@WriterAccessibilityService).apply {
                 background = Ui.background(Color.rgb(46,46,46),Ui.dp(this@WriterAccessibilityService,2))
             }, android.widget.FrameLayout.LayoutParams(Ui.dp(this@WriterAccessibilityService,32),Ui.dp(this@WriterAccessibilityService,4),Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
@@ -673,15 +682,50 @@ class WriterAccessibilityService : AccessibilityService() {
                 Engine.main.postDelayed(resume, 15 * 60 * 1000L)
             },
             "Disable in this app" to { snapshot?.pkg?.let { prefs.block(it, true) }; clearField() }
-        ), overlayStyle = true)
-        val scroll = ScrollView(this).apply { isFillViewport = false; addView(assistant); isFocusable = false }
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        ), overlayStyle = true, modeChanged = { compact ->
+            compactSheet = compact; handleArea.visibility = if (compact) View.GONE else View.VISIBLE
+            root.background = if (compact) null else sheetBackground()
+            positionOverlays()
+        }, inlineRight = sheetOnRight, inlineDrag = ::bindInlineDrag)
+        root.addView(assistant, LinearLayout.LayoutParams(-1, 0, 1f))
         panel = assistant; sheet = root
         sheetParams = overlayParams(-1, Ui.dp(this, 360))
         positionOverlays()
         if (runCatching { wm.addView(root, sheetParams) }.isFailure) { closeSheet(); return }
         hideBubble()
         assistant.update(current.text, true, knownCorrections)
+    }
+
+    private fun bindInlineDrag(view: View) {
+        view.setOnTouchListener(object : View.OnTouchListener {
+            var startX = 0f; var startY = 0f; var anchorX = 0; var anchorY = 0; var moved = false
+            override fun onTouch(v: View, event: MotionEvent): Boolean {
+                val p = sheetParams ?: return false
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        startX = event.rawX; startY = event.rawY; moved = false
+                        anchorX = p.x + if (sheetOnRight) p.width-Ui.dp(this@WriterAccessibilityService,48) else 0
+                        anchorY = p.y
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.rawX-startX; val dy = event.rawY-startY
+                        if (abs(dx)+abs(dy) > Ui.dp(this@WriterAccessibilityService,8)) moved = true
+                        if (moved) {
+                            sheetAnchorX = anchorX+dx.toInt(); sheetAnchorY = anchorY+dy.toInt()
+                            positionOverlays()
+                        }
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (moved) {
+                            dragX = p.x + if (sheetOnRight) p.width-Ui.dp(this@WriterAccessibilityService,48) else 0
+                            dragY = p.y
+                        } else v.performClick()
+                    }
+                    MotionEvent.ACTION_CANCEL -> moved = false
+                }
+                return true
+            }
+        })
     }
 
 
@@ -708,9 +752,19 @@ class WriterAccessibilityService : AccessibilityService() {
             bubble?.takeIf { it.isAttachedToWindow }?.let { runCatching { wm.updateViewLayout(it, p) } }
         }
         sheetParams?.let { p ->
-            p.width = maxOf(Ui.dp(this, 120), right - left)
-            p.height = minOf(Ui.dp(this, 430), maxOf(Ui.dp(this, 80), bottom - top))
-            p.x = left; p.y = maxOf(top, bottom - p.height)
+            if (compactSheet) {
+                p.width = minOf(right-left,bounds.width()/2+Ui.dp(this,80))
+                p.height = minOf(Ui.dp(this,56),maxOf(Ui.dp(this,32),bottom-top))
+                val anchor = if (sheetAnchorX < 0) right-Ui.dp(this,48) else sheetAnchorX
+                val x = if (sheetOnRight) anchor+Ui.dp(this,48)-p.width else anchor
+                p.x = x.coerceIn(left,maxOf(left,right-p.width))
+                p.y = (if (sheetAnchorY < 0) bottom-p.height else sheetAnchorY).coerceIn(top,maxOf(top,bottom-p.height))
+            } else {
+                p.width = maxOf(Ui.dp(this,120),bounds.width()-insets.left-insets.right)
+                val sheetBottom = bottom+Ui.dp(this,8)
+                p.height = maxOf(Ui.dp(this,80),sheetBottom-top)
+                p.x = insets.left; p.y = maxOf(top,sheetBottom-p.height)
+            }
             sheet?.takeIf { it.isAttachedToWindow }?.let { runCatching { wm.updateViewLayout(it, p) } }
         }
     }
@@ -723,7 +777,7 @@ class WriterAccessibilityService : AccessibilityService() {
         val wasOpen = sheet != null
         panel?.dispose(); panel = null; panelSnapshot = null
         sheet?.let { if (connected) runCatching { wm.removeViewImmediate(it) } }
-        sheet = null; sheetParams = null
+        sheet = null; sheetParams = null; compactSheet = false
         if (connected && wasOpen && current != null) {
             if (cached != null) {
                 checkedSnapshot = current.copy(revision = revision); fieldEdits = cached

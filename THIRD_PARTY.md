@@ -12,5 +12,7 @@ The root MIT license covers this project's original Kotlin, JNI and build-tool c
 | Kotlin runtime/compiler | [JetBrains Kotlin](https://github.com/JetBrains/kotlin), 2.2.20 | Apache-2.0 |
 | Host test JSON library | [JSON-java](https://github.com/stleary/JSON-java), 20250517 | Public domain |
 | English spelling frequency dictionary | [SymSpell](https://github.com/wolfgarbe/SymSpell), revision `c239062ae02961df18ab7da1671d01b4388204e0` | MIT; attribution bundled in notices/SPELLING-LICENSE.txt |
+| Inter fonts (Regular, Medium, SemiBold) | [Inter / Google Fonts](https://github.com/google/fonts/tree/main/ofl/inter); unmodified open font files from the supplied artifact | SIL Open Font License 1.1; bundled in notices/INTER-OFL.txt |
+| Inter Tight font (SemiBold) | [Inter Tight / Google Fonts](https://github.com/google/fonts/tree/main/ofl/intertight); unmodified open font file from the supplied artifact | SIL Open Font License 1.1; bundled in notices/INTERTIGHT-OFL.txt |
 
-See upstream notices in the downloaded runtime/compiler/source distributions for transitive components. Grammarly's supplied Android APK remains proprietary and is not a dependency of this app. This project is not affiliated with Grammarly.
+See upstream notices in the downloaded runtime/compiler/source distributions for transitive components. The open Inter font families retain their upstream licenses. Grammarly's supplied Android APK remains proprietary and is not a dependency of this app; no proprietary font family is included. This project is not affiliated with Grammarly.

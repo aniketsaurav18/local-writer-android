@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import android.graphics.Typeface
 import android.os.SystemClock
 import android.view.View
 
@@ -17,6 +16,7 @@ class WritingWidget(context: Context) : View(context) {
     private val logo = context.getDrawable(R.drawable.ic_writer_widget)!!
     private val density = resources.displayMetrics.density
     private val fontSize = 14f * resources.displayMetrics.scaledDensity
+    private val font = resources.getFont(R.font.inter_medium)
     private var count = 0
     private var state = WritingCheckState.IDLE
 
@@ -60,7 +60,7 @@ class WritingWidget(context: Context) : View(context) {
 
     private fun drawLabel(canvas: Canvas, text: String, cx: Float, cy: Float) {
         paint.style = Paint.Style.FILL; paint.color = Color.WHITE
-        paint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        paint.typeface = font
         paint.textSize = fontSize
         // Preserve the circle with enlarged system fonts and the three-character cap.
         val available = 26f * density

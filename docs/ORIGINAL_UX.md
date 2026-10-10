@@ -1,6 +1,6 @@
 # Original UX reference and independent implementation
 
-The supplied Grammarly 2.118.100055 APK was already decompiled under the sibling `oss-grammerly/build/jadx/sources` directory. This investigation reused those artifacts; the app implementation includes none of the proprietary classes or assets.
+The supplied Grammarly 2.118.100055 APK was already decompiled under the sibling `oss-grammerly/build/jadx/sources` directory. This investigation reused those artifacts; the app implementation includes none of the proprietary classes or assets. The open-source Inter font files used for overlay typography are separately attributed under their SIL OFL licenses.
 
 ## Observed from static sources
 
@@ -14,7 +14,7 @@ No client `refreshWithExtraData` or `getAvailableExtraData` use was found in the
 
 ## Resulting Local Writer behavior
 
-The compact circle opens a correction sheet immediately using already-checked suggestions when available; pending checks continue through the panel. Cards expand/collapse, show marked context and old/new text, and offer Accept/Dismiss. A marked text preview selects and scrolls to the matching card. The app editor marks insertion errors on a visible word instead of whitespace.
+The compact circle first opens an inline edit pill using already-checked suggestions when available; pending checks continue through the panel. Tapping its short edit applies it, the trash icon ignores it, and the counter expands the full list. Long edits offer a Review suggestions pill instead. Expanded cards show a single contextual edit and offer Accept/Dismiss. A marked text preview is available in options. The app editor marks insertion errors on a visible word instead of whitespace.
 
 As an enhancement, external underlines use exact Android character rectangles when the host exposes them. Unsupported geometry falls back to the marked sheet preview; it is not estimated from screenshots or guessed font metrics. No field is changed merely to draw underlines.
 
@@ -35,3 +35,11 @@ The revision shell has 28dp top corners (`yi1.java:1768`), a32×4dp handle with 
 The original also has a configurable 15dp inactive appearance at 80% alpha (`i64.java:13`, `u64.java:25`) with several state-dependent transitions. The available evidence does not establish one generic inactivity timeout; Local Writer keeps the active 30dp size while typing instead of inventing an equivalent timer. Exact pixel equality and the original rendered UI remain unverified; no original runtime navigation was performed.
 
 The app hides its badge while its own sheet is open and restores it on close, preventing interference with Accept. The original bounded source has an intersection-based blank-badge rule (`m34.java:100`, `h44.java:61`, `p34.java:200`), but no explicit revision-sheet hide/reposition rule; the app behavior is an independent adaptation.
+
+## Separate compact and expanded surfaces (0.1.5)
+
+The owner chose compact first, then expansion to the list. Further inspection distinguishes the original inline surface (`yi1.m`, `yi1.l`, `ix1.j`) from revision mode. Its mini title is 10sp, short styled edit is 13sp Inter Regular, title/edit gap is 2dp, and pill corners are 12dp with 10dp left/8dp right/2dp vertical padding. The ignore icon has a 37dp target (`yi1.k`, `ix1.g`). Applying the short edit is direct (`mp.java:98`); long or special edits fall back to Review suggestions. Local Writer uses this compact arrangement next to its counted badge and supports dragging the inline badge.
+
+Revision uses a 16sp Inter Tight heading with 24dp line height (`dna.d`, `hoa`, `in3`), 11sp Inter category labels (`dna.o`), and 16sp Inter context with 24dp line height (`dna.k`, `im8.f`). The bottom toolbar places the product icon left and an AI icon right with flexible space between them (`xgc.o`); it does not contain three large Corrections/Rewrite/Tone tabs. Local Writer now keeps its header and toolbar fixed around the scrolling list and removes the duplicate context-plus-diff presentation.
+
+The original phone overlay is full width and bottom aligned (`ag4.java:49`, `yi1.p`). A previously noted 650dp value is a default **height**, not a maximum width. Local Writer's expanded sheet fills the space above the keyboard, within system/cutout insets. Its inline surface remains small and anchored at the badge. The local model exposes edits rather than the original server's explanation/category metadata, so issue titles are inferred from each transformation. Exact rendered equality remains unverified; no agent-driven phone interaction or runtime tests were performed.
