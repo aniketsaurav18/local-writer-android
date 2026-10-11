@@ -82,14 +82,17 @@ class WriterAccessibilityService : AccessibilityService() {
     private var readFailure = ReadFailure.TRANSIENT
     private var transientReadAttempts = 0
     private var fieldReadPending = false
-    private var emptyPillMinimizeScheduled = false
+    private var pillMinimizeScheduled = false
+    private var pillTouchActive = false
     private var receiverRegistered = false
     private var dragX = -1
     private var dragY = -1
     private val refresh = Runnable { refreshField() }
-    private val minimizeEmptyPill = Runnable {
-        emptyPillMinimizeScheduled = false
-        if (shouldMinimizeEmptyPill()) closeSheet()
+    private val minimizePill = Runnable {
+        pillMinimizeScheduled = false
+        if (shouldMinimizePill()) {
+            if (!typingVisible() || fieldReadPending) clearField() else closeSheet()
+        }
     }
     private val resume = Runnable { scheduleRefresh() }
     private val confirmUndo: Runnable = Runnable {
@@ -142,6 +145,7 @@ class WriterAccessibilityService : AccessibilityService() {
             super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
             if (promptFocused) { positionOverlays(); return }
             if (sheet == null) invalidateResults()
+            else if (oldSelStart != newSelStart || oldSelEnd != newSelEnd) restartPillMinimize()
             scheduleRefresh()
         }
         override fun onFinishInput() {
@@ -149,9 +153,8 @@ class WriterAccessibilityService : AccessibilityService() {
             editor = null; epoch++
             dismissedEditor = null; dismissedNode = null
             if (promptFocused) { positionOverlays(); return }
-            if (sheet != null) {
-                // The sheet owns a captured editor. Losing its IME connection during
-                // overlay creation is not proof the user switched fields or apps.
+            if (sheet != null && !compactSheet) {
+                // Only the expanded review menu owns a captured editor across IME teardown.
                 invalidateResults(); fieldReadPending = true; scheduleRefresh()
             } else clearField()
         }
@@ -190,6 +193,9 @@ class WriterAccessibilityService : AccessibilityService() {
                 if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
                     (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED && sheet == null) ||
                     event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED) invalidateResults()
+                if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED && pkg == snapshot?.pkg &&
+                    (event.fromIndex != snapshot?.selectionStart || event.toIndex != snapshot?.selectionEnd))
+                    restartPillMinimize()
                 if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED && undo?.confirmed == true) undo = null
                 if (undo?.confirmed == false) {
                     Engine.main.removeCallbacks(confirmUndo); Engine.main.postDelayed(confirmUndo, 350)
@@ -216,7 +222,7 @@ class WriterAccessibilityService : AccessibilityService() {
         pkg != "com.android.systemui" && prefs.allowed(pkg) && unlocked()
 
     private fun invalidateResults() {
-        cancelEmptyPillMinimize()
+        cancelPillMinimize()
         revision++
         checkedSnapshot = null; fieldEdits = emptyList()
         if (sheet == null) {
@@ -225,6 +231,7 @@ class WriterAccessibilityService : AccessibilityService() {
             updateBubble()
         }
         if (connected) { analysis.cancel(); highlights.clear() }
+        schedulePillMinimize()
     }
 
     private fun nodeKey(node: AccessibilityNodeInfo) = NodeKey(node.windowId, node.hashCode(), node.viewIdResourceName, node.uniqueId)
@@ -340,7 +347,7 @@ class WriterAccessibilityService : AccessibilityService() {
             val sensitive = rawFocus?.let { it.isPassword || (Build.VERSION.SDK_INT >= 34 && it.isAccessibilityDataSensitive) || TextLogic.sensitive(it.inputType) } == true
             rawFocus?.recycle()
             if (sensitive) { readFailure = ReadFailure.REJECTED; return null }
-            val capturedRead = focus == null && sheet != null && snapshot?.node != null
+            val capturedRead = focus == null && sheet != null && !compactSheet && snapshot?.node != null
             if (capturedRead) {
                 focus = retainedNodeForRead(root)
                 if (focus == null) return null
@@ -386,10 +393,9 @@ class WriterAccessibilityService : AccessibilityService() {
             positionOverlays()
             return
         }
-        // A field can remain focused after Back hides the keyboard. Do not leave
-        // a launcher on that screen. An already-open correction sheet keeps its
-        // captured editor across transient IME changes until it is dismissed.
-        if (sheet == null && !typingVisible()) { clearField(); return }
+        // The launcher and compact pill belong to the typing session. Only an
+        // expanded review menu retains its captured editor after the IME closes.
+        if ((sheet == null || compactSheet) && !typingVisible()) { clearField(); return }
         val read = readSnapshot()
         if (read == null) {
             if (retryTransientRead()) return
@@ -463,9 +469,10 @@ class WriterAccessibilityService : AccessibilityService() {
         openSheet()
     }
 
-    /** Keep an open menu tied to its document, rather than an arbitrary IME timeout. */
+    /** Expanded review survives transient reads; a compact pill must not retain stale text indefinitely. */
     private fun retryTransientRead(): Boolean {
         if (readFailure != ReadFailure.TRANSIENT || capturedTargetState() == CapturedTargetState.GONE) return false
+        if (compactSheet && transientReadAttempts >= 4) return false
         fieldReadPending = true
         highlights.clear()
         positionOverlays()
@@ -705,26 +712,29 @@ class WriterAccessibilityService : AccessibilityService() {
 
     private fun updateBubble() {
         bubble?.update(suggestionCount, checkState)
-        scheduleEmptyPillMinimize()
+        schedulePillMinimize()
     }
 
-    private fun shouldMinimizeEmptyPill(): Boolean {
-        val result = issueStore.current
-        return connected && sheet != null && compactSheet && !promptFocused && !fieldReadPending &&
-            !result.pending && !result.unavailable && result.issues.isEmpty() &&
-            (checkState == WritingCheckState.READY || checkState == WritingCheckState.IDLE)
+    private fun shouldMinimizePill(): Boolean =
+        connected && sheet != null && compactSheet && !promptFocused && !pillTouchActive
+
+    private fun cancelPillMinimize() {
+        Engine.main.removeCallbacks(minimizePill)
+        pillMinimizeScheduled = false
     }
 
-    private fun cancelEmptyPillMinimize() {
-        Engine.main.removeCallbacks(minimizeEmptyPill)
-        emptyPillMinimizeScheduled = false
+    private fun restartPillMinimize() {
+        cancelPillMinimize()
+        schedulePillMinimize()
     }
 
-    private fun scheduleEmptyPillMinimize() {
-        if (!shouldMinimizeEmptyPill()) { cancelEmptyPillMinimize(); return }
-        if (emptyPillMinimizeScheduled) return
-        emptyPillMinimizeScheduled = true
-        Engine.main.postDelayed(minimizeEmptyPill, 3000)
+    private fun schedulePillMinimize() {
+        if (!shouldMinimizePill()) { cancelPillMinimize(); return }
+        if (pillMinimizeScheduled) return
+        pillMinimizeScheduled = true
+        // Analysis updates do not extend this deadline. Continued typing or pill
+        // interaction restarts it; corrections remain in the badge after collapse.
+        Engine.main.postDelayed(minimizePill, 3000)
     }
 
     private fun imeVisible(): Boolean {
@@ -857,7 +867,8 @@ class WriterAccessibilityService : AccessibilityService() {
             handleArea.visibility = if (compact) View.GONE else View.VISIBLE
             root.background = if (compact) null else sheetBackground()
             positionOverlays()
-            scheduleEmptyPillMinimize()
+            restartPillMinimize()
+            scheduleRefresh()
         }, inputFocusChanged = ::setPromptFocused, inlineDrag = ::bindInlineDrag, inlineWidthChanged = { width ->
             if (compactWidth != width) { compactWidth = width; positionOverlays() }
         },
@@ -880,7 +891,7 @@ class WriterAccessibilityService : AccessibilityService() {
         hideBubble()
         assistant.acceptAnalysis(current.text, issueStore.current)
         if (expanded) assistant.openSuggestions()
-        scheduleEmptyPillMinimize()
+        schedulePillMinimize()
     }
 
     private fun setPromptFocused(focused: Boolean) {
@@ -933,6 +944,8 @@ class WriterAccessibilityService : AccessibilityService() {
                 val p = sheetParams ?: return false
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
+                        pillTouchActive = true
+                        cancelPillMinimize()
                         startX = event.rawX; startY = event.rawY; moved = false
                         anchorX = p.x + if (sheetOnRight) p.width-Ui.dp(this@WriterAccessibilityService,48) else 0
                         anchorY = p.y
@@ -946,12 +959,17 @@ class WriterAccessibilityService : AccessibilityService() {
                         }
                     }
                     MotionEvent.ACTION_UP -> {
+                        pillTouchActive = false
                         if (moved) {
                             dragX = p.x + if (sheetOnRight) p.width-Ui.dp(this@WriterAccessibilityService,48) else 0
                             dragY = p.y
                         } else v.performClick()
+                        restartPillMinimize()
                     }
-                    MotionEvent.ACTION_CANCEL -> moved = false
+                    MotionEvent.ACTION_CANCEL -> {
+                        moved = false; pillTouchActive = false
+                        restartPillMinimize()
+                    }
                 }
                 return true
             }
@@ -1017,16 +1035,16 @@ class WriterAccessibilityService : AccessibilityService() {
         if (compactSheet) { closeSheet(); return }
         if (sheetDismissing) return
         sheetDismissing = true
-        cancelEmptyPillMinimize()
+        cancelPillMinimize()
         root.animate().cancel()
         root.animate().translationY(maxOf(root.height,sheetParams?.height ?: 0).toFloat())
             .setDuration(180).withEndAction { if (sheet === root) closeSheet() }.start()
     }
 
     private fun closeSheet() {
-        sheetDismissing = false
+        sheetDismissing = false; pillTouchActive = false
         sheet?.animate()?.cancel()
-        cancelEmptyPillMinimize()
+        cancelPillMinimize()
         val current = snapshot
         val previous = panelSnapshot
         val cached = if (current != null && previous != null && sameTarget(previous, current) &&
