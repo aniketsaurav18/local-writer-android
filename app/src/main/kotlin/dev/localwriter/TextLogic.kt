@@ -45,6 +45,7 @@ object TextLogic {
         return word?.let { it.start to it.end }
     }
     fun diff(old: String, corrected: String, offset: Int = 0): List<Edit> {
+        if (old == corrected) return emptyList()
         val a = words(old); val b = words(corrected)
         val lcs = Array(a.size + 1) { IntArray(b.size + 1) }
         for (i in a.indices.reversed()) for (j in b.indices.reversed())
@@ -103,15 +104,25 @@ object TextLogic {
         return result
     }
     fun apply(text: String, edits: List<Edit>): String {
-        var end = text.length; var result = text
-        for (e in edits.sortedByDescending { it.begin }) {
+        if (edits.isEmpty()) return text
+        val ordered = edits.sortedByDescending { it.begin }
+        var end = text.length
+        for (e in ordered) {
             require(e.actionable) { "This suggestion has no automatic correction" }
             require(e.begin in 0..e.end && e.end <= end) { "Invalid or overlapping correction" }
             require(e.begin == 0 || e.begin == text.length || !text[e.begin].isLowSurrogate()) { "Split Unicode character" }
             require(e.end == 0 || e.end == text.length || !text[e.end].isLowSurrogate()) { "Split Unicode character" }
-            result = result.substring(0, e.begin) + e.replacement + result.substring(e.end); end = e.begin
+            end = e.begin
         }
-        return result
+        // Copy each unchanged span once. Reversing the stable descending order also
+        // preserves the existing ordering of multiple insertions at one position.
+        val result = StringBuilder(text.length)
+        var cursor = 0
+        for (e in ordered.asReversed()) {
+            result.append(text, cursor, e.begin).append(e.replacement)
+            cursor = e.end
+        }
+        return result.append(text, cursor, text.length).toString()
     }
     fun sensitive(inputType: Int): Boolean {
         val klass = inputType and 15; val variation = inputType and 0xff0

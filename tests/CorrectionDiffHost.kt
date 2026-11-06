@@ -3,6 +3,7 @@ package dev.localwriter
 /** Regression checks for independently accepting a word-order correction. */
 fun main() {
     sharedTextLogicRegressions()
+    bulkEditRegressions()
     val examples = listOf(
         "Hey why you are ignoring my messages?" to "Hey, why are you ignoring my messages?",
         "Can you tell me where is the nearest bus stop?" to "Can you tell me where the nearest bus stop is?",
@@ -44,6 +45,34 @@ fun main() {
     store.update("I received the address.")
     check(store.current.issues.isEmpty()) { "Editing the sentence must clear its stale finding" }
     println("PASS: atomic word order, independent corrections, Unicode, spelling ranking and stale findings")
+}
+
+private fun bulkEditRegressions() {
+    check(TextLogic.apply("abc", listOf(Edit(1, 1, "X"), Edit(1, 1, "Y"))) == "aYXbc")
+    check(TextLogic.apply("abc", listOf(Edit(1, 2, "X"), Edit(1, 1, "Y"))) == "aYXc")
+    check(runCatching { TextLogic.apply("abc", listOf(Edit(1, 1, "Y"), Edit(1, 2, "X"))) }.isFailure)
+    check(runCatching { TextLogic.apply("abc", listOf(Edit(0, 1, "x", actionable = false))) }.isFailure)
+    check(runCatching { TextLogic.apply("abc", listOf(Edit(0, 4, "x"))) }.isFailure)
+    check(TextLogic.apply("", listOf(Edit(0, 0, "hello"))) == "hello")
+    check(TextLogic.apply("abc", listOf(Edit(0, 3, ""))) == "")
+    val random = kotlin.random.Random(42)
+    repeat(200) {
+        val text = "😀 Sample text. ".repeat(100)
+        val edits = (0 until 100).map { index ->
+            val start = index * 16 + 3
+            Edit(start, start + random.nextInt(0, 6), listOf("", "x", "longer replacement", "😀").random(random))
+        }.shuffled(random)
+        var expected = text
+        for (edit in edits.sortedByDescending { it.begin }) {
+            expected = expected.substring(0, edit.begin) + edit.replacement + expected.substring(edit.end)
+        }
+        check(TextLogic.apply(text, edits) == expected) { "Bulk edit ordering changed" }
+    }
+    // An unchanged document should not allocate a quadratic token comparison table.
+    val unchanged = "word ".repeat(20_000)
+    check(TextLogic.diff(unchanged, unchanged).isEmpty())
+    check(TextLogic.correctionDiff(unchanged, unchanged, 12).isEmpty())
+    println("PASS: bulk edits match reference, insertion order, validation and large unchanged text")
 }
 
 /** Engine-independent checks retained from the retired ONNX test harness. */
